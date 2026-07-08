@@ -508,9 +508,15 @@ new-code lines.
 
 ## Risks & open questions
 
-- **RXNE deadline at 2 MHz** is the load-bearing number; M3 measures it
-  before anything depends on it. Fallback: 1 MHz hwdef (functionally
-  free; only bus-thread occupancy grows).
+- ~~**RXNE deadline at 2 MHz**~~ **M3 MEASURED** (loopback, gapless master,
+  code in RAM, handler worst case 88–91 cycles): byte 1's FIFO load happens
+  at the byte-0 IRQ itself, so it can only be served by bytes queued before
+  the command. With the dummy pre-stuffed at select, **dummy protocols
+  (accel, BMP390) are clean through 10.5 MHz — native speed, reactively**;
+  no-dummy protocols (gyro, RM3100) are clean at 1.3 MHz, 12 % first-byte
+  underrun at 2.6 MHz. Consequence: hwdef lowspeed 1 MHz for gyro + mag
+  (RM3100 is ≤ 1 MHz anyway), accel/baro free choice; prediction (M7) is
+  now a gyro-data-phase-only question.
 - **MISO tri-state on deselect** among the three tied MISO pins:
   verify in M3; fallbacks (EXTI-to-analog, 74LVC125) are ready and
   cheap.

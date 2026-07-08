@@ -509,14 +509,20 @@ new-code lines.
 ## Risks & open questions
 
 - ~~**RXNE deadline at 2 MHz**~~ **M3 MEASURED** (loopback, gapless master,
-  code in RAM, handler worst case 88–91 cycles): byte 1's FIFO load happens
-  at the byte-0 IRQ itself, so it can only be served by bytes queued before
-  the command. With the dummy pre-stuffed at select, **dummy protocols
-  (accel, BMP390) are clean through 10.5 MHz — native speed, reactively**;
-  no-dummy protocols (gyro, RM3100) are clean at 1.3 MHz, 12 % first-byte
-  underrun at 2.6 MHz. Consequence: hwdef lowspeed 1 MHz for gyro + mag
-  (RM3100 is ≤ 1 MHz anyway), accel/baro free choice; prediction (M7) is
-  now a gyro-data-phase-only question.
+  code in RAM, handler worst case 72–73 cycles with the inline vector
+  shim): byte 1's FIFO load happens at the byte-0 IRQ itself, so it can
+  only be served by bytes queued before the command. With the dummy
+  pre-stuffed at select, **dummy protocols (accel, BMP390) are clean
+  through 5.25 MHz reactively** (10.5 MHz ran clean twice, sparse
+  bit-level corruption once — jumper setup/hold territory, informational);
+  no-dummy protocols (gyro, RM3100) are clean at 1.3 MHz and sit exactly
+  at the byte-1 wall at 2.6 MHz (61–156 bad bytes across builds ±5 handler
+  cycles apart: a boundary, not an optimization target). Consequence:
+  hwdef lowspeed 1 MHz for gyro + mag (RM3100 is ≤ 1 MHz anyway),
+  accel/baro data phase up to ~5 MHz; prediction (M7) is now a
+  gyro-data-phase-only question. Bench bycatch: a lost-wakeup race in the
+  master driver's check-then-WFI wait, fixed with the PRIMASK-guarded WFI
+  idiom — the ancestor driver deserves the same look.
 - **MISO tri-state on deselect** among the three tied MISO pins:
   verify in M3; fallbacks (EXTI-to-analog, 74LVC125) are ready and
   cheap.

@@ -3,7 +3,7 @@
 
 PART      = STM32G474
 PARTFULL  = STM32G474RET6
-MEMTARGET = STM32G474Exx_ROM
+MEMTARGET = STM32G474Exx_RAM
 
 LIB    = ../../n-array/lib
 PERIPH = ../../n-array/periph/stm32g4

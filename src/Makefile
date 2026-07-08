@@ -43,7 +43,7 @@ $(MEMTARGET).ld: $(NARRAY)
 
 rotanimb01.elf: $(GEN) $(CSRC) board.h $(LIB)/sections.ld
 	$(CC) $(CFLAGS) $(CSRC) $(LDFLAGS) -o $@
-	$(SIZE) $@
+	@$(SIZE) $@ | awk 'BEGIN {printf("%6s %6s %6s  %6s %6s %s\n", "text", "data", "bss", "flash", "ram", "file")} $$1*1 == $$1 {printf("%6d %6d %6d  %6d %6d %s\n", $$1, $$2, $$3-$$1, $$1+$$2, $$2+$$3, $$6)}'
 
 rotanimb01.bin: rotanimb01.elf
 	$(OBJCOPY) -O binary $< $@

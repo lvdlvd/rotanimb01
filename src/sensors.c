@@ -11,14 +11,19 @@
 enum { // BMI088 accel
 	A_CHIP_ID = 0x00, A_ERR_REG = 0x02, A_STATUS = 0x03, A_DATA = 0x12,
 	A_SENSORTIME = 0x18, A_INT_STAT_1 = 0x1D, A_TEMP_MSB = 0x22, A_TEMP_LSB = 0x23,
-	A_CONF = 0x40, A_RANGE = 0x41, A_INT1_IO_CTRL = 0x53, A_INT2_IO_CTRL = 0x54,
+	A_FIFO_LEN0 = 0x24, A_FIFO_LEN1 = 0x25, A_FIFO_DATA = 0x26,
+	A_CONF = 0x40, A_RANGE = 0x41, A_FIFO_DOWNS = 0x45, A_FIFO_WTM0 = 0x46,
+	A_FIFO_WTM1 = 0x47, A_FIFO_CONFIG0 = 0x48, A_FIFO_CONFIG1 = 0x49,
+	A_INT1_IO_CTRL = 0x53, A_INT2_IO_CTRL = 0x54,
 	A_INT_MAP_DATA = 0x58, A_SELF_TEST = 0x6D, A_PWR_CONF = 0x7C, A_PWR_CTRL = 0x7D,
 	A_SOFTRESET = 0x7E,
 };
 enum { // BMI088 gyro
-	G_CHIP_ID = 0x00, G_RATE = 0x02, G_INT_STAT_1 = 0x0A, G_RANGE = 0x0F,
-	G_BANDWIDTH = 0x10, G_LPM1 = 0x11, G_SOFTRESET = 0x14, G_INT_CTRL = 0x15,
-	G_IO_CONF = 0x16, G_IO_MAP = 0x18, G_SELF_TEST = 0x3C,
+	G_CHIP_ID = 0x00, G_RATE = 0x02, G_INT_STAT_1 = 0x0A, G_FIFO_STATUS = 0x0E,
+	G_RANGE = 0x0F, G_BANDWIDTH = 0x10, G_LPM1 = 0x11, G_RATE_HBW = 0x13,
+	G_SOFTRESET = 0x14, G_INT_CTRL = 0x15, G_IO_CONF = 0x16, G_IO_MAP = 0x18,
+	G_SELF_TEST = 0x3C, G_FIFO_CONFIG0 = 0x3D, G_FIFO_CONFIG1 = 0x3E,
+	G_FIFO_DATA = 0x3F,
 };
 enum { // BMP390
 	B_CHIP_ID = 0x00, B_REV_ID = 0x01, B_ERR_REG = 0x02, B_STATUS = 0x03,
@@ -36,12 +41,13 @@ enum { // RM3100
 #define BIT(a) [(a) / 8] |= 1u << ((a) % 8) // (documentation; masks are literal below)
 
 static const uint8_t accel_wmask[SPIDEV_REGS / 8] = {
-	// 0x40,0x41 | 0x53,0x54,0x58 | 0x6D | 0x7C,0x7D,0x7E
-	[0x40 / 8] = 0x03, [0x53 / 8] = 0x18, [0x58 / 8] = 0x01, [0x6D / 8] = 0x20, [0x7C / 8] = 0x70,
+	// 0x40,0x41,0x45..0x47 | 0x48,0x49 | 0x53,0x54,0x58 | 0x6D | 0x7C,0x7D,0x7E
+	[0x40 / 8] = 0xE3, [0x48 / 8] = 0x03, [0x53 / 8] = 0x18, [0x58 / 8] = 0x01,
+	[0x6D / 8] = 0x20, [0x7C / 8] = 0x70,
 };
 static const uint8_t gyro_wmask[SPIDEV_REGS / 8] = {
-	// 0x0F | 0x10,0x11,0x14,0x15,0x16 | 0x18 | 0x3C
-	[0x0F / 8] = 0x80, [0x10 / 8] = 0x73, [0x18 / 8] = 0x01, [0x3C / 8] = 0x10,
+	// 0x0F | 0x10,0x11,0x13,0x14,0x15,0x16 | 0x18 | 0x3C,0x3D,0x3E
+	[0x0F / 8] = 0x80, [0x10 / 8] = 0x7B, [0x18 / 8] = 0x01, [0x3C / 8] = 0x70,
 };
 static const uint8_t baro_wmask[SPIDEV_REGS / 8] = {
 	// 0x15..0x1A (FIFO wtm+cfg, INT_CTRL, IF_CONF) | 0x1B..0x1D | 0x1F | 0x7E
@@ -58,6 +64,41 @@ static volatile bool accel_reset_req, gyro_reset_req, baro_reset_req;
 static uint32_t gyro_drdy_set_us;
 static volatile bool gyro_drdy_armed;
 static volatile bool mag_poll_pending; // single-shot POLL awaiting a sample
+
+// ---- the BMI088 FIFOs (M4b, spec = the ArduPilot driver) --------------------
+// Served through the engine's streaming register; content stays flat at the
+// buffer head, pops memmove the remainder forward (deselect hook, group-0
+// exclusive with the bus IRQs). Pops round len DOWN to whole frames: the
+// engine's len may overcount by the TX FIFO prefetch, and the driver only
+// reads whole-frame multiples. Accel: headered 7-byte frames (0x84 + xyz LE),
+// the only frame type this model emits; drops silently at full (stop-at-full
+// mode, and the driver has no accel overrun path). Gyro: headerless 6-byte
+// frames; at full the FIFO_STATUS overrun bit is raised, which the driver
+// answers by rewriting FIFO_CONFIG1 — any write there clears the FIFO.
+
+static uint8_t accel_fifo[146 * 7]; // ~1 KB, like the part
+static uint16_t accel_fifo_fill;
+static uint8_t gyro_fifo[100 * 6]; // 100 frames, like the part
+static uint16_t gyro_fifo_fill;
+
+static void accel_fifo_sync(struct SPIDev *d) { // fill -> FIFO_LENGTH regs
+	encode_le_uint16(&d->reg[A_FIFO_LEN0], accel_fifo_fill);
+}
+
+static void gyro_fifo_sync(struct SPIDev *d) { // fill -> frame count, keep overrun
+	d->reg[G_FIFO_STATUS] = (d->reg[G_FIFO_STATUS] & 0x80) | (uint8_t)(gyro_fifo_fill / 6);
+}
+
+static void fifo_pop(uint8_t *fifo, uint16_t *fill, int len, int framesz) {
+	int n = (len / framesz) * framesz;
+	if (n > *fill) {
+		n = *fill;
+	}
+	for (int i = n; i < *fill; i++) {
+		fifo[i - n] = fifo[i];
+	}
+	*fill -= (uint16_t)n;
+}
 
 // ---- frame hooks: clear-on-read, DRDY release, write side effects ----------
 // Run at deselect (priority 0): register flips and flags only.
@@ -78,9 +119,17 @@ static void accel_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
 				(d->reg[A_INT1_IO_CTRL] & 0x02) ? digitalLo(DRDY_ACC) : digitalHi(DRDY_ACC);
 			}
 		}
+		if (addr == A_FIFO_DATA) { // FIFO drain (the engine's streaming register)
+			fifo_pop(accel_fifo, &accel_fifo_fill, len, 7);
+			accel_fifo_sync(d);
+		}
 		return;
 	}
 	// writes are already stored through the wmask; side effects:
+	if (addr <= A_FIFO_CONFIG1 && addr + len > A_FIFO_CONFIG0) {
+		accel_fifo_fill = 0; // FIFO config writes clear the FIFO
+		accel_fifo_sync(d);
+	}
 	if (addr <= A_SOFTRESET && addr + len > A_SOFTRESET && d->reg[A_SOFTRESET] == 0xB6) {
 		accel_reset_req = true;
 	}
@@ -88,7 +137,15 @@ static void accel_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
 
 static void gyro_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
 	if (cmd & 0x80) {
+		if (addr == G_FIFO_DATA) { // FIFO drain (the engine's streaming register)
+			fifo_pop(gyro_fifo, &gyro_fifo_fill, len, 6);
+			gyro_fifo_sync(d);
+		}
 		return; // gyro drdy is time-cleared, not read-cleared
+	}
+	if (addr <= G_FIFO_CONFIG1 && addr + len > G_FIFO_CONFIG1) {
+		gyro_fifo_fill = 0; // FIFO_CONFIG1 writes clear the FIFO and the overrun
+		d->reg[G_FIFO_STATUS] = 0;
 	}
 	if (addr <= G_SOFTRESET && addr + len > G_SOFTRESET && d->reg[G_SOFTRESET] == 0xB6) {
 		gyro_reset_req = true;
@@ -162,7 +219,10 @@ static void accel_reset(struct SPIDev *d) {
 	d->reg[A_STATUS] = 0x10;
 	d->reg[A_CONF] = 0xA8;
 	d->reg[A_RANGE] = 0x01;
-	d->reg[A_PWR_CONF] = 0x03; // powers up suspended
+	d->reg[A_FIFO_CONFIG0] = 0x02;
+	d->reg[A_FIFO_CONFIG1] = 0x10; // bit4 reads 1
+	d->reg[A_PWR_CONF] = 0x03;     // powers up suspended
+	accel_fifo_fill = 0;
 }
 
 static void gyro_reset(struct SPIDev *d) {
@@ -172,6 +232,7 @@ static void gyro_reset(struct SPIDev *d) {
 	d->reg[G_CHIP_ID] = 0x0F;
 	d->reg[G_BANDWIDTH] = 0x80;
 	d->reg[G_IO_CONF] = 0x0F;
+	gyro_fifo_fill = 0;
 }
 
 static void baro_reset(struct SPIDev *d) {
@@ -218,8 +279,10 @@ static struct BMP390Cal baro_cal;
 // devs[] in ascending CS pin order: PC0, PC1, PA4, PB12
 struct SPIDev baro_dev = {.cs = CS_BARO, .read_cmd_mask = 0x80, .ndummy = 1, .wmask = baro_wmask, .frame = baro_frame};
 struct SPIDev mag_dev = {.cs = CS_MAG, .read_cmd_mask = 0x80, .ndummy = 0, .wmask = mag_wmask, .frame = mag_frame};
-struct SPIDev gyro_dev = {.cs = CS_GYRO, .read_cmd_mask = 0x80, .ndummy = 0, .wmask = gyro_wmask, .frame = gyro_frame};
-struct SPIDev accel_dev = {.cs = CS_ACC, .read_cmd_mask = 0x80, .ndummy = 1, .wmask = accel_wmask, .frame = accel_frame};
+struct SPIDev gyro_dev = {.cs = CS_GYRO, .read_cmd_mask = 0x80, .ndummy = 0, .wmask = gyro_wmask, .frame = gyro_frame,
+                          .stream = gyro_fifo, .stream_size = sizeof gyro_fifo, .stream_addr = G_FIFO_DATA};
+struct SPIDev accel_dev = {.cs = CS_ACC, .read_cmd_mask = 0x80, .ndummy = 1, .wmask = accel_wmask, .frame = accel_frame,
+                           .stream = accel_fifo, .stream_size = sizeof accel_fifo, .stream_addr = A_FIFO_DATA};
 
 static struct SPIDev *const devtab[] = {&baro_dev, &mag_dev, &gyro_dev, &accel_dev};
 struct SPISlave sensor_bus = SPISLAVE_INITIALIZER(SPI3, DMA1_CH5, devtab, 4, 0x00);
@@ -334,6 +397,24 @@ float mag_lsb_per_ut(void) {
 
 // ---- sample commits (quantized values in, registers + DRDY out) --------------
 
+static void gyro_apply(struct SPIDev *d, void *ctx) {
+	const uint8_t *buf = ctx;
+	for (int i = 0; i < 6; i++) {
+		d->reg[G_RATE + i] = buf[i];
+	}
+	if (d->reg[G_FIFO_CONFIG1] & 0xC0) { // FIFO or STREAM mode
+		if (gyro_fifo_fill + 6u <= sizeof gyro_fifo) {
+			for (int i = 0; i < 6; i++) {
+				gyro_fifo[gyro_fifo_fill + i] = buf[i];
+			}
+			gyro_fifo_fill += 6;
+		} else {
+			d->reg[G_FIFO_STATUS] |= 0x80; // overrun: frame dropped
+		}
+		gyro_fifo_sync(d);
+	}
+}
+
 bool gyro_commit(const int16_t xyz[3], uint32_t now_us) {
 	if (gyro_rate_hz() == 0) {
 		return false;
@@ -342,7 +423,7 @@ bool gyro_commit(const int16_t xyz[3], uint32_t now_us) {
 	for (int a = 0; a < 3; a++) {
 		encode_le_uint16(&buf[2 * a], (uint16_t)xyz[a]);
 	}
-	if (!spidev_commit(&sensor_bus, &gyro_dev, G_RATE, buf, 6)) {
+	if (!spidev_apply(&sensor_bus, &gyro_dev, gyro_apply, buf)) {
 		return false;
 	}
 	if (gyro_dev.reg[G_INT_CTRL] & 0x80) {
@@ -354,6 +435,26 @@ bool gyro_commit(const int16_t xyz[3], uint32_t now_us) {
 		}
 	}
 	return true;
+}
+
+static void accel_apply(struct SPIDev *d, void *ctx) {
+	const uint8_t *buf = ctx; // xyz[6] + temp[2]
+	for (int i = 0; i < 6; i++) {
+		d->reg[A_DATA + i] = buf[i];
+	}
+	d->reg[A_TEMP_MSB] = buf[6];
+	d->reg[A_TEMP_LSB] = buf[7];
+	d->reg[A_STATUS] |= 0x80;
+	if (d->reg[A_FIFO_CONFIG1] & 0x40) { // acc_en: frames flow into the FIFO
+		if (accel_fifo_fill + 7u <= sizeof accel_fifo) {
+			accel_fifo[accel_fifo_fill] = 0x84; // accel data frame header
+			for (int i = 0; i < 6; i++) {
+				accel_fifo[accel_fifo_fill + 1 + i] = buf[i];
+			}
+			accel_fifo_fill += 7;
+			accel_fifo_sync(d);
+		} // full: stop-at-full drops silently
+	}
 }
 
 bool accel_commit(const int16_t xyz[3], float t_degc) {
@@ -369,14 +470,10 @@ bool accel_commit(const int16_t xyz[3], float t_degc) {
 		v[1] = defl;
 		v[2] = (st == 0x0D) ? 1000 : -1000;
 	}
-	uint8_t buf[6];
+	uint8_t buf[8]; // xyz + the 11-bit temperature (0.125 K/LSB, offset 23 degC)
 	for (int a = 0; a < 3; a++) {
 		encode_le_uint16(&buf[2 * a], (uint16_t)v[a]);
 	}
-	if (!spidev_commit(&sensor_bus, &accel_dev, A_DATA, buf, 6)) {
-		return false;
-	}
-	// 11-bit temperature, 0.125 K/LSB, offset 23 degC; MSB at the LOWER address
 	int32_t t = (int32_t)((t_degc - 23.0f) * 8.0f);
 	if (t > 1023) {
 		t = 1023;
@@ -384,10 +481,11 @@ bool accel_commit(const int16_t xyz[3], float t_degc) {
 	if (t < -1024) {
 		t = -1024;
 	}
-	uint8_t tbuf[2] = {(uint8_t)((t >> 3) & 0xFF), (uint8_t)((t & 7) << 5)};
-	spidev_commit(&sensor_bus, &accel_dev, A_TEMP_MSB, tbuf, 2);
-
-	accel_dev.reg[A_STATUS] |= 0x80;
+	buf[6] = (uint8_t)((t >> 3) & 0xFF); // TEMP_MSB: MSB at the LOWER address
+	buf[7] = (uint8_t)((t & 7) << 5);
+	if (!spidev_apply(&sensor_bus, &accel_dev, accel_apply, buf)) {
+		return false;
+	}
 	accel_dev.reg[A_INT_STAT_1] = 0x80;
 	if (accel_dev.reg[A_INT_MAP_DATA] & 0x04 && (accel_dev.reg[A_INT1_IO_CTRL] & 0x08)) {
 		// drdy mapped to INT1 and INT1 output enabled, per configured polarity

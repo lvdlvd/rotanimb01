@@ -156,3 +156,49 @@ Findings from the DUT drivers themselves:
   config writes **with readback verification**; accel: CHIP_ID dummy read
   (the CSB1 wake), PWR_CTRL 0x04, 50 ms, PWR_CONF 0x00, self-test with
   amplitude checks, power-on again, config + readback.
+
+## Addendum M4b — the BMI088 FIFOs as the ArduPilot driver drives them
+
+Implemented to the driver, cross-checked against a later datasheet rev.
+Both FIFOs are served through the slave engine's streaming register (a
+read burst starting at FIFO_DATA streams a side buffer instead of the
+file; the address does not auto-increment, matching silicon).
+
+**Accel** (`FIFO_LEN 0x24/25 le, FIFO_DATA 0x26, DOWNS 0x45, WTM 0x46/47,
+CONFIG0 0x48, CONFIG1 0x49`):
+
+- AP config: CONF 0x9C (1600 Hz OSR2), RANGE 0x03, PWR_CONF 0, PWR_CTRL 4,
+  CONFIG0 0x02 (stop-at-full), CONFIG1 0x50 (acc_en; bit4 always 1 — reset
+  value 0x10). Read-first, then write with readback, per register.
+- Read cycle: LEN (2 bytes le; AP treats bit15 as "empty" — we simply
+  serve the byte count), clamp to 8 frames = 56 bytes, burst from
+  FIFO_DATA (accel dummy byte applies), parse headered frames by
+  `byte0 & 0xFC`: 0x84 accel (7 B, xyz le, the ONLY frame this model
+  emits), 0x40/0x48/0x50 skip-class (2 B), 0x44 sensortime (4 B) — parsed
+  but unused by AP, so not emitted.
+- Semantics: capacity 146 frames (~1 KB, like the part); full = drop
+  silently (AP has no accel overrun path); ANY write touching
+  CONFIG0/CONFIG1 clears the FIFO; softreset clears. LEN always a
+  multiple of 7.
+- Temperature stays a direct read (TEMP_MSB 0x22, 11-bit signed,
+  0.125 °C/LSB, offset 23), every 100th AP cycle.
+
+**Gyro** (`FIFO_STATUS 0x0E, CONFIG0 0x3D (wtm), CONFIG1 0x3E,
+FIFO_DATA 0x3F`; plus RATE_HBW 0x13 in the config set):
+
+- AP config after softreset, ALL as checked registers (periodic readback,
+  mismatch = error + rewrite): RANGE 0, BW 0x80, LPM1 0, RATE_HBW 0,
+  CONFIG1 0x40 (fifo stop-at-full). => 0x13, 0x3D, 0x3E joined the wmask.
+- Read cycle: FIFO_STATUS = overrun<<7 | frame count, clamp 8 frames,
+  burst count*6 headerless bytes (no dummy) from FIFO_DATA, xyz le.
+- Semantics: capacity 100 frames (600 B, like the part); full = raise the
+  overrun bit and drop; AP answers overrun by rewriting CONFIG1 — any
+  write to CONFIG1 clears FIFO + overrun. Rate registers stay live in
+  parallel.
+
+**Pop accounting**: the engine's frame len may overcount by the TX FIFO
+prefetch (≤ 4 bytes never shifted out), so the deselect hook pops
+`floor(len / framesize) * framesize` bytes — exact as long as the master
+reads whole-frame multiples, which both AP read cycles do (56 = 8×7,
+count×6). Commits append frame + length registers in one atomic
+`spidev_apply`, so a select never observes a torn FIFO.

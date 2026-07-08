@@ -126,7 +126,7 @@ static int failures;
 	} while (0)
 
 static uint16_t rregs(int dev, uint8_t reg, uint8_t *val, int n) {
-	uint8_t buf[32];
+	uint8_t buf[80]; // room for the ArduPilot FIFO reads (1 + dummy + 56)
 	int nd = master_dev[dev].ndummy;
 	buf[0] = 0x80 | reg;
 	for (int i = 0; i < 1 + nd + n; i++) {
@@ -333,6 +333,106 @@ static void test_mag(void) {
 	tprintf(" ok (frames %u)\n", (unsigned)mag_dev.frames);
 }
 
+// M4b: the ArduPilot BMI088 driver's FIFO protocol, replayed verbatim ---------
+
+static void test_gyro_fifo(void) {
+	tprintf("gyro fifo:");
+	// AP gyro_init: chip id, soft reset, then checked-register config
+	CHECK(rreg(DEV_GYRO, 0x00) == 0x0F, "chip id");
+	wreg(DEV_GYRO, 0x14, 0xB6);
+	delay_us(30000);
+	static const struct cfg cfg[] = {
+		{0x0F, 0x00}, // 2000 dps
+		{0x10, 0x80}, // 532 Hz filter, 2 kHz ODR (bit7 reads 1)
+		{0x11, 0x00}, // no low-power
+		{0x13, 0x00}, // filtered data
+		{0x3E, 0x40}, // FIFO stop-at-full
+	};
+	config_and_verify(DEV_GYRO, cfg, 5, "gyro fifo");
+	// ~10 frames at 2 kHz
+	delay_us(5000);
+	uint8_t st = rreg(DEV_GYRO, 0x0E);
+	CHECK(!(st & 0x80), "overrun set early: %02x", st);
+	int nf = st & 0x7F;
+	CHECK(nf >= 8 && nf <= 14, "frame count %d", nf);
+	// AP reads at most 8 frames, headerless 6-byte X,Y,Z
+	uint8_t data[48];
+	rregs(DEV_GYRO, 0x3F, data, 8 * 6);
+	for (int i = 0; i < 8; i++) {
+		for (int a = 0; a < 3; a++) {
+			int16_t v = (int16_t)decode_le_uint16(&data[6 * i + 2 * a]);
+			CHECK(v == 0, "frame %d axis %d: %d", i, a, v);
+		}
+	}
+	int nf2 = rreg(DEV_GYRO, 0x0E) & 0x7F;
+	CHECK(nf2 < nf, "pop: count %d -> %d", nf, nf2);
+	// rate registers stay live alongside the FIFO
+	rregs(DEV_GYRO, 0x02, data, 6);
+	CHECK((int16_t)decode_le_uint16(&data[0]) == 0, "rate reg x");
+	// let it overrun (100 frames = 50 ms at 2 kHz), then reset the AP way
+	delay_us(65000);
+	st = rreg(DEV_GYRO, 0x0E);
+	CHECK(st == (0x80 | 100), "overrun status %02x", st);
+	wreg(DEV_GYRO, 0x3E, 0x40); // AP's overrun answer: rewrite FIFO_CONFIG_1
+	st = rreg(DEV_GYRO, 0x0E);
+	CHECK((st & 0x80) == 0 && (st & 0x7F) <= 1, "status after reset %02x", st);
+	tprintf(" ok\n");
+}
+
+static void test_accel_fifo(void) {
+	tprintf("accel fifo:");
+	// AP accel_config, read-first then write-and-verify per register
+	static const struct cfg cfg[] = {
+		{0x40, 0x9C}, // OSR2, 1600 Hz
+		{0x41, 0x03}, // 24 g
+		{0x7C, 0x00}, // no low-power
+		{0x7D, 0x04}, // accel on
+		{0x48, 0x02}, // FIFO_CONFIG0: stop-at-full
+		{0x49, 0x50}, // FIFO_CONFIG1: acc_en (bit4 stays 1)
+	};
+	for (int i = 0; i < 6; i++) {
+		if (rreg(DEV_ACC, cfg[i].reg) == cfg[i].val) {
+			continue;
+		}
+		wreg(DEV_ACC, cfg[i].reg, cfg[i].val);
+		uint8_t v = rreg(DEV_ACC, cfg[i].reg);
+		CHECK(v == cfg[i].val, "config reg %02x: %02x != %02x", cfg[i].reg, v, cfg[i].val);
+	}
+	delay_us(50000); // config change cleared the FIFO; let it earn > 8 frames
+	uint8_t len[2];
+	rregs(DEV_ACC, 0x24, len, 2);
+	int fl = decode_le_uint16(len);
+	CHECK(!(fl & 0x8000), "length flag %04x", fl);
+	CHECK(fl % 7 == 0 && fl >= 8 * 7, "length %d", fl);
+	// AP clamps at 8 frames per cycle; headered frames, type in byte 0
+	int want = (int16_t)(32767.0f / 24.0f); // 1 g on Z
+	uint8_t data[56];
+	rregs(DEV_ACC, 0x26, data, 56);
+	for (int i = 0; i < 56; i += 7) {
+		CHECK((data[i] & 0xFC) == 0x84, "frame %d header %02x", i / 7, data[i]);
+		int16_t x = (int16_t)decode_le_uint16(&data[i + 1]);
+		int16_t z = (int16_t)decode_le_uint16(&data[i + 5]);
+		CHECK(x == 0, "frame %d x %d", i / 7, x);
+		CHECK(z > want - 8 && z < want + 8, "frame %d z %d", i / 7, z);
+	}
+	rregs(DEV_ACC, 0x24, len, 2);
+	int fl2 = decode_le_uint16(len);
+	CHECK(fl2 % 7 == 0 && fl2 < fl, "pop: length %d -> %d", fl, fl2);
+	// AP temperature path: 11-bit, 0.125 degC/LSB, offset 23; sampler says 25.0
+	uint8_t tb[2];
+	rregs(DEV_ACC, 0x22, tb, 2);
+	int t11 = (tb[0] << 3) | (tb[1] >> 5);
+	if (t11 > 1023) {
+		t11 -= 2048;
+	}
+	CHECK(t11 == 16, "temp lsb %d", t11); // 23 + 16*0.125 = 25.0
+	// disabling via a FIFO config write clears the FIFO
+	wreg(DEV_ACC, 0x49, 0x10);
+	rregs(DEV_ACC, 0x24, len, 2);
+	CHECK(decode_le_uint16(len) == 0, "length after disable %d", decode_le_uint16(len));
+	tprintf(" ok\n");
+}
+
 // ---- bring-up ----------------------------------------------------------------
 
 // IRQ priorities, 2:2 grouping, same scheme as the harness proper: SPI3 and
@@ -426,6 +526,8 @@ void Reset_Handler(void) {
 	test_accel();
 	test_baro();
 	test_mag();
+	test_gyro_fifo();
+	test_accel_fifo();
 
 	tprintf("stray %u overlap %u unexpected %u+%u+%u+%u\n",
 	        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.overlap,

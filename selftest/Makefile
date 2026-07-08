@@ -33,7 +33,7 @@ $(GEN):
 
 selftest.elf: $(GEN) $(CSRC) ../src/board.h ../src/sensors.h $(LIB)/sections.ld
 	$(CC) $(CFLAGS) $(CSRC) $(LDFLAGS) -o $@
-	$(SIZE) $@
+	@$(SIZE) $@ | awk 'BEGIN {printf("%6s %6s %6s  %6s %6s %s\n", "text", "data", "bss", "flash", "ram", "file")} $$1*1 == $$1 {printf("%6d %6d %6d  %6d %6d %s\n", $$1, $$2, $$3-$$1, $$1+$$2, $$2+$$3, $$6)}'
 
 selftest.bin: selftest.elf
 	$(OBJCOPY) -O binary $< $@

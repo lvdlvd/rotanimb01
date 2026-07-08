@@ -174,8 +174,6 @@ static void gyro_reset(struct SPIDev *d) {
 	d->reg[G_IO_CONF] = 0x0F;
 }
 
-extern const struct BMP390Trim baro_trim; // defined below with the bus
-
 static void baro_reset(struct SPIDev *d) {
 	for (int i = 0; i < SPIDEV_REGS; i++) {
 		d->reg[i] = 0;

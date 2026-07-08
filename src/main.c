@@ -74,6 +74,35 @@ static void can_send(uint32_t msgid, const uint8_t *payload, size_t len) {
 	fdcan_tx(&can1, (uint8_t)msgid, can_header_from29(id29), len, payload); // tag = msgid
 }
 
+// IRQ priorities, 2:2 grouping: level[3:2] = preemption group, level[1:0] =
+// subpriority (orders pending IRQs only). Handlers in the SAME group can
+// never preempt each other — the spislave engine relies on that for SPI3 vs
+// the CS EXTIs (both mutate the bus state; select/deselect vs byte-0 decode
+// must serialize).
+enum { IRQ_PRIORITY_GROUPING_2_2 = 5 };
+#define PRIO(grp, sub) ((grp) << 2 | (sub))
+static const struct {
+	enum IRQn_Type irq;
+	uint8_t prio;
+} irqprios[] = {
+	{SPI3_IRQn, PRIO(0, 0)},      // byte-0 cmd decode, ~72-cycle deadline
+	{EXTI0_IRQn, PRIO(0, 1)},     // CS baro: dummy pre-stuff / deselect scrub
+	{EXTI1_IRQn, PRIO(0, 1)},     // CS mag
+	{EXTI4_IRQn, PRIO(0, 1)},     // CS gyro
+	{EXTI15_10_IRQn, PRIO(0, 1)}, // CS accel
+
+	{TIM2_IRQn, PRIO(1, 0)}, // PWM capture ch1-4 (µs timestamps)
+	{TIM3_IRQn, PRIO(1, 0)}, // PWM capture ch5-8
+
+	{FDCAN1_IT0_IRQn, PRIO(1, 1)}, // TX events, bus-off
+	{FDCAN1_IT1_IRQn, PRIO(1, 1)}, // RX: command mailboxes
+
+	{DMA1_CH1_IRQn, PRIO(2, 0)}, // console TX DMA
+	{DMA1_CH2_IRQn, PRIO(2, 0)}, // console RX DMA
+	{USART1_IRQn, PRIO(2, 0)},   // console TX kick / RX idle flush
+};
+#undef PRIO
+
 void Reset_Handler(void) __attribute__((noreturn));
 void Reset_Handler(void) {
 	narray_init_memory();
@@ -83,6 +112,11 @@ void Reset_Handler(void) {
 	SCB.CCR |= SCB_CCR_DIV_0_TRP;                   // div-by-zero -> UsageFault
 
 	board_init(); // clock + peripheral clocks + the whole pinout
+
+	nvic_set_priority_grouping(IRQ_PRIORITY_GROUPING_2_2);
+	for (size_t i = 0; i < sizeof irqprios / sizeof irqprios[0]; i++) {
+		nvic_set_priority(irqprios[i].irq, irqprios[i].prio);
+	}
 
 	dma_set_mux(DMA1_CH1, DMA_REQ_USART1_TX);
 	dma_set_mux(DMA1_CH2, DMA_REQ_USART1_RX);

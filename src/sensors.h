@@ -24,6 +24,7 @@
 
 extern struct SPISlave sensor_bus; // SPI3 + the four devices, CS-demuxed
 extern struct SPIDev gyro_dev, accel_dev, baro_dev, mag_dev;
+extern const struct BMP390Trim baro_trim; // the trim served as the baro's NVM
 
 // regfile resets + spislave_init. The app enables RCC clocks (SPI3, SYSCFG),
 // routes DMAMUX and EXTI, and owns the vectors.

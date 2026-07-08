@@ -6,7 +6,18 @@ the "optional test harness application (based on same STM32 MCU)" step
 of the n-array workflow, and the first consumer of several planned lib
 drivers (fdcan, pwm capture, exti, SPI slave).
 
-v2 supersedes v1: the single-SPI-with-4-CS-demux topology is replaced by
+**v3 (2026-07-08, post-M3 measurement): back to v1's single-SPI topology,
+now with evidence.** All four devices are served by ONE SPI slave (SPI3)
+with 4 CS lines demuxed by EXTI. The M3 bench measured the shared engine:
+dummy protocols (accel, baro) run reactively clean to 5.25 MHz — no
+prediction needed — and the no-dummy pair is speed-capped regardless
+(RM3100 ≤ 1 MHz by datasheet, gyro at 1 MHz hwdef). v2's hybrid existed
+only for the hardware-NSS prediction path, which measurement made moot.
+DUT wiring shrinks to 3 bus wires + 4 CS + 4 DRDY; SPI1/SPI2 pins stay
+reserved (the v2 fallback if bus occupancy ever pinches: ~25 % of one
+DUT bus thread estimated with ArduPilot's FIFO-draining driver).
+
+v2 superseded v1: the single-SPI-with-4-CS-demux topology was replaced by
 a **hybrid**: dedicated SPI slaves with hardware NSS for the two BMI088
 dies, one shared SPI with software CS demux for the two slow devices.
 Rationale in "The two deadlines" below. SPI4 was considered and ruled
@@ -143,11 +154,11 @@ and M3 measures it before anything depends on it.
 
 | Signal        | Pin  | Function        | Notes                        |
 |---------------|------|-----------------|------------------------------|
-| GYRO NSS      | PA4  | SPI1_NSS AF5    | hw NSS; + EXTI4 (frame end)  |
+| GYRO CS (v3)  | PA4  | GPIO in, EXTI4  | v2 role: SPI1_NSS AF5        |
 | GYRO SCK      | PA5  | SPI1_SCK AF5    |                              |
 | GYRO MISO     | PA6  | SPI1_MISO AF5   | tied w/ PB14, PC11 → DUT MISO|
 | GYRO MOSI     | PA7  | SPI1_MOSI AF5   |                              |
-| ACC NSS       | PB12 | SPI2_NSS AF5    | hw NSS; + EXTI12             |
+| ACC CS (v3)   | PB12 | GPIO in, EXTI12 | v2 role: SPI2_NSS AF5        |
 | ACC SCK       | PB13 | SPI2_SCK AF5    |                              |
 | ACC MISO      | PB14 | SPI2_MISO AF5   |                              |
 | ACC MOSI      | PB15 | SPI2_MOSI AF5   |                              |

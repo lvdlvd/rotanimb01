@@ -18,12 +18,14 @@
 #include "board.h"
 #include "canmsg.h"
 #include "clock.h"
+#include "exti.h"
 #include "console.h" // pulls serial.h + tprintf.h
 #include "fault.h"
 #include "fdcan.h"
 #include "gpio.h"
 #include "nvic.h"
 #include "pwm.h"
+#include "sensors.h"
 #include "startup.h"
 
 extern const isr_t __vectors[]; // the vector table, defined at the foot of the file
@@ -101,6 +103,18 @@ void Reset_Handler(void) {
 	nvic_enable(FDCAN1_IT0_IRQn);
 	nvic_enable(FDCAN1_IT1_IRQn);
 
+	// the SPI3 sensor bus: four register-file devices, CS demux on EXTI
+	dma_set_mux(DMA1_CH5, DMA_REQ_SPI3_TX);
+	sensors_init();
+	exti_init(CS_BARO | CS_MAG, true, true);
+	exti_init(CS_GYRO, true, true);
+	exti_init(CS_ACC, true, true);
+	nvic_enable(SPI3_IRQn);
+	nvic_enable(EXTI0_IRQn);
+	nvic_enable(EXTI1_IRQn);
+	nvic_enable(EXTI4_IRQn);
+	nvic_enable(EXTI15_10_IRQn);
+
 	fault_report(cputc); // print a crash from the previous run, if any
 	tprintf("\nrotanimb01 HITL harness on STM32G474, sysclk = %u Hz, hse = %u Hz, can kernel = %u Hz, srcid %02x\n",
 	        (unsigned)clock_sysclk_hz(), (unsigned)clock_hse_hz, (unsigned)clock_fdcan_hz(), srcid);
@@ -123,6 +137,35 @@ void Reset_Handler(void) {
 		}
 
 		uint32_t now = now_us();
+		sensors_poll(now);
+
+		// Static bench-cal sampler until M5's physics: 1 g down, zero rates,
+		// mid-latitude field, ISA sea level — at each device's LIVE config
+		// rate. The M5 scheduler replaces this loop.
+		{
+			static uint32_t t_g, t_a, t_b, t_m;
+			uint32_t hz;
+			if ((hz = gyro_rate_hz()) != 0 && now - t_g >= 1000000u / hz) {
+				t_g = now;
+				const int16_t zero[3] = {0, 0, 0};
+				gyro_commit(zero, now);
+			}
+			if ((hz = accel_rate_hz()) != 0 && now - t_a >= 1000000u / hz) {
+				t_a = now;
+				int16_t g1[3] = {0, 0, (int16_t)(32767.0f / accel_fullscale_g())}; // +1 g on Z
+				accel_commit(g1, 25.0f);
+			}
+			if ((hz = baro_rate_hz()) != 0 && now - t_b >= 1000000u / hz) {
+				t_b = now;
+				baro_commit(15.0f, 101325.0);
+			}
+			if ((hz = mag_rate_hz()) != 0 && now - t_m >= 1000000u / hz) {
+				t_m = now;
+				float lsb = mag_lsb_per_ut();
+				int32_t field[3] = {(int32_t)(20.0f * lsb), 0, (int32_t)(44.0f * lsb)}; // ~48 uT, incl 65 deg
+				mag_commit(field);
+			}
+		}
 
 		// gather widths; a channel with no completed period for 100 ms reads 0
 		uint16_t w[8];
@@ -180,8 +223,12 @@ void Reset_Handler(void) {
 		if ((int32_t)(now - t_tick) >= 1000000) { // console heartbeat 1 Hz
 			t_tick = now;
 			digitalToggle(LED);
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u cmd seq %u can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u spi g/a/b/m %u/%u/%u/%u unexp %u stray %u cmd seq %u can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
+			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
+			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
+			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
+			        (unsigned)sensor_bus.stray,
 			        (unsigned)cmd_state.seq, (unsigned)can1.status.tx_count,
 			        (unsigned)can1.status.rx_count[0],
 			        (unsigned)can1.status.lec_count[1], (unsigned)can1.status.lec_count[2],
@@ -202,6 +249,10 @@ static void usart1(void) {
 
 static void tim2(void) { pwmin_irq_handler(&cap2); }
 static void tim3(void) { pwmin_irq_handler(&cap3); }
+
+// the sensor bus: byte-0 deadline path inlined with constant instances
+static void spi3(void) { spislave_irq(&sensor_bus, &SPI3, DMA1_CH5); }
+static void sensor_cs(void) { spislave_cs_handler(&sensor_bus); }
 
 // FDCAN1 IT0: tx events + errors — drain the event fifo (updates counters).
 static void fdcan1_it0(void) {
@@ -258,6 +309,11 @@ __attribute__((section(".isr_vector"))) const isr_t __vectors[NVIC_VECTORS] = {
 	[VECTOR(USART1_IRQn)] = usart1,
 	[VECTOR(TIM2_IRQn)] = tim2,
 	[VECTOR(TIM3_IRQn)] = tim3,
+	[VECTOR(SPI3_IRQn)] = spi3,
+	[VECTOR(EXTI0_IRQn)] = sensor_cs,
+	[VECTOR(EXTI1_IRQn)] = sensor_cs,
+	[VECTOR(EXTI4_IRQn)] = sensor_cs,
+	[VECTOR(EXTI15_10_IRQn)] = sensor_cs,
 	[VECTOR(FDCAN1_IT0_IRQn)] = fdcan1_it0,
 	[VECTOR(FDCAN1_IT1_IRQn)] = fdcan1_it1,
 };

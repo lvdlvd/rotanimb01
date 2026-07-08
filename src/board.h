@@ -11,10 +11,12 @@
 // Status LED (breakout board, active low).
 #define LED PC13
 
-// DUT-driven chip selects for the two slow devices on shared SPI3 (inputs,
-// both-edge EXTI from M3 on). The BMI088 pair uses hardware NSS (PA4/PB12).
-#define CS_BARO PC0 // EXTI0
-#define CS_MAG	PC1 // EXTI1
+// DUT-driven chip selects, all four demuxed on the shared SPI3 slave
+// (v3 topology): GPIO inputs on distinct EXTI lines.
+#define CS_BARO PC0  // EXTI0
+#define CS_MAG	PC1  // EXTI1
+#define CS_GYRO PA4  // EXTI4
+#define CS_ACC	PB12 // EXTI12 (shared EXTI15_10 vector)
 
 // Data-ready outputs to the DUT, driven per each device's INT config.
 #define DRDY_ACC  PC4 // BMI088 INT1

@@ -69,13 +69,12 @@ static const pinconf_t board[] = {
 void board_init(void) {
 	clock_init_168(); // HSE if present (auto-measured), else HSI16
 
-	// Peripheral clocks for everything in use through M2 (console, PWM
-	// capture on TIM2/3, FDCAN1); SPI1/2/3 + SYSCFG/EXTI and TIM7 come in
-	// with M3/M5.
+	// Peripheral clocks: console, PWM capture on TIM2/3, FDCAN1, the SPI3
+	// sensor bus + SYSCFG for its CS EXTIs; TIM7 comes with M5's scheduler.
 	RCC.AHB1ENR |= RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMAMUX1EN;
 	RCC.AHB2ENR |= RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN;
-	RCC.APB1ENR1 |= RCC_APB1ENR1_TIM2EN | RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_FDCANEN;
-	RCC.APB2ENR |= RCC_APB2ENR_USART1EN;
+	RCC.APB1ENR1 |= RCC_APB1ENR1_TIM2EN | RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_FDCANEN | RCC_APB1ENR1_SPI3EN;
+	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_SYSCFGEN;
 	rcc_ccipr_fdcansel_set(2); // FDCAN kernel clock = PCLK1 (168 MHz: /12 -> 14 tq at 1 Mbit)
 
 	gpioConfigAll(board, sizeof board / sizeof board[0]);

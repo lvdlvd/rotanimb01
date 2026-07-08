@@ -1,0 +1,12 @@
+.DS_Store
+
+# build artifacts (src generates device.h/pinmux.h/*.ld via narray)
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+/src/device.h
+/src/pinmux.h
+/src/*.ld
+/bmp390inv/golden

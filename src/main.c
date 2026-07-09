@@ -7,7 +7,12 @@
 //
 // CAN dictionary: 29-bit bit-field headers and big-endian payloads per the
 // shared in-house convention — layout and the harness's MSGID allocation
-// (the 0x40 block, both LCCs) in canmsg.h.
+// (the 0x40 block, both LCCs) in canmsg.h. The host link carries that
+// dictionary over one of two transports sharing PA11/PA12 (wiring-level
+// either/or, chosen at build time): TRANSPORT=usb (default) tunnels the
+// messages as pseudocan lines (lib/fmtcan, no per-line crc: USB bulk has
+// link-level integrity) over the CDC-ACM virtual serial port; TRANSPORT=can
+// is FDCAN1 through an external transceiver.
 //
 // M5: TIM7 ticks at 10 kHz; the main loop consumes ticks and runs the table
 // scheduler — physics integration on every 5th tick (2 kHz), and a Bresenham
@@ -33,9 +38,11 @@
 #include "physics.h"
 
 #include <math.h>
+#include "fmtcan.h"
 #include "pwm.h"
 #include "sensors.h"
 #include "startup.h"
+#include "usb.h"
 
 extern const isr_t __vectors[]; // the vector table, defined at the foot of the file
 
@@ -73,14 +80,49 @@ static void cmd_store(struct CmdBox *b, const uint8_t *p, size_t len) {
 	b->seq++;
 }
 
-// ---- CAN TX helpers --------------------------------------------------------
-static struct FDCan can1 = FDCAN_INITIALIZER(FDCAN1);
+// ---- host link TX ------------------------------------------------------------
 static uint8_t srcid; // hashed from the device UID at boot
+
+#ifdef TRANSPORT_CAN
+static struct FDCan can1 = FDCAN_INITIALIZER(FDCAN1);
+#else
+// pseudocan over the USB VCP: usb_recv fills usb_rx from the USB_LP irq,
+// everything else runs at thread level (fmtcan's SPSC split)
+static uint8_t usb_rx_bytes[512], usb_tx_bytes[2048];
+static struct Fifo usb_rx = {usb_rx_bytes, sizeof usb_rx_bytes - 1, 0, 0};
+static struct Fifo usb_tx = {usb_tx_bytes, sizeof usb_tx_bytes - 1, 0, 0};
+static uint32_t usb_bad, usb_drop; // malformed host lines; usb_tx overflows
+#endif
 
 static void can_send(uint32_t msgid, const uint8_t *payload, size_t len) {
 	static uint8_t seq[4]; // per-message ts_seq, CANMSG_PWM14..DIAG
 	uint32_t id29 = canmsg_id29(CANMSG_LCC_MEAS, msgid, 0, srcid, seq[msgid - CANMSG_PWM14]++);
+#ifdef TRANSPORT_CAN
 	fdcan_tx(&can1, (uint8_t)msgid, can_header_from29(id29), len, payload); // tag = msgid
+#else
+	// no per-line crc: USB bulk already has link-level integrity
+	if (can_fifo_put(&usb_tx, 1, 0, can_header_from29(id29), len, payload) == 0) {
+		usb_drop++;
+	}
+#endif
+}
+
+// one message from the host, either transport: latch known commands
+static void host_msg(uint32_t id29, const uint8_t *p, size_t len) {
+	if (canmsg_lcc(id29) != CANMSG_LCC_TMC) {
+		return;
+	}
+	switch (canmsg_msgid(id29)) {
+	case CANMSG_CMD_STATE:
+		cmd_store(&cmd_state, p, len);
+		break;
+	case CANMSG_CMD_ENV:
+		cmd_store(&cmd_env, p, len);
+		break;
+	case CANMSG_CMD_NOISE:
+		cmd_store(&cmd_noise, p, len);
+		break;
+	}
 }
 
 // IRQ priorities, 2:2 grouping: level[3:2] = preemption group, level[1:0] =
@@ -107,6 +149,8 @@ static const struct {
 	{FDCAN1_IT1_IRQn, PRIO(1, 1)}, // RX: command mailboxes
 
 	{TIM7_DAC2_4_IRQn, PRIO(2, 1)}, // 10 kHz scheduler tick (counter only)
+
+	{USB_LP_IRQn, PRIO(2, 1)}, // usb: protocol + pseudocan rx bytes
 
 	{DMA1_CH1_IRQn, PRIO(2, 0)}, // console TX DMA
 	{DMA1_CH2_IRQn, PRIO(2, 0)}, // console RX DMA
@@ -230,9 +274,14 @@ void Reset_Handler(void) {
 	nvic_enable(TIM3_IRQn);
 
 	srcid = canmsg_srcid_self();
+#ifdef TRANSPORT_CAN
 	fdcan_init(&can1, clock_fdcan_hz(), 1000000);
 	nvic_enable(FDCAN1_IT0_IRQn);
 	nvic_enable(FDCAN1_IT1_IRQn);
+#else
+	usb_init("rotanimb01", "hitl-harness"); // board.c brought up CLK48 + CRS
+	nvic_enable(USB_LP_IRQn);
+#endif
 
 	// report a crash from the previous run BEFORE re-entering the bring-up
 	// that may have caused it (a boot-time assert would reset-loop silently
@@ -261,8 +310,14 @@ void Reset_Handler(void) {
 	TIM7.CR1 = TIM_BASIC_INST_CR1_CEN;
 	nvic_enable(TIM7_DAC2_4_IRQn);
 
-	tprintf("\nrotanimb01 HITL harness on STM32G474, sysclk = %u Hz, hse = %u Hz, can kernel = %u Hz, srcid %02x\n",
-	        (unsigned)clock_sysclk_hz(), (unsigned)clock_hse_hz, (unsigned)clock_fdcan_hz(), srcid);
+	tprintf("\nrotanimb01 HITL harness on STM32G474, sysclk = %u Hz, hse = %u Hz, srcid %02x, transport %s\n",
+	        (unsigned)clock_sysclk_hz(), (unsigned)clock_hse_hz, srcid,
+#ifdef TRANSPORT_CAN
+	        "can"
+#else
+	        "usb pseudocan"
+#endif
+	);
 
 	// Report state per PWM channel: last sent width and the staleness tracker.
 	struct {
@@ -283,6 +338,32 @@ void Reset_Handler(void) {
 
 		uint32_t now = now_us();
 		sensors_poll(now);
+
+#ifndef TRANSPORT_CAN
+		// pseudocan lines from the host -> the command mailboxes
+		for (;;) {
+			unsigned pport;
+			uint32_t header;
+			size_t plen;
+			uint8_t pbuf[8];
+			int r = can_fifo_get(&usb_rx, &pport, &header, &plen, pbuf);
+			if (r == 0) {
+				break;
+			}
+			if (r < 0) {
+				usb_bad++;
+				continue;
+			}
+			if (can_header_isext(header)) {
+				host_msg(can_header_to29(header), pbuf, plen);
+			}
+		}
+		if (usb_dtr()) {
+			usb_send(&usb_tx);
+		} else {
+			fifo_reset(&usb_tx); // nobody listening: don't accumulate
+		}
+#endif
 		cmd_decode();
 
 		// the table scheduler: consume 10 kHz ticks; physics every 5th
@@ -372,9 +453,15 @@ void Reset_Handler(void) {
 				errs += cap2.ch[i].errs + cap3.ch[i].errs;
 			}
 			uint8_t p[8];
+#ifdef TRANSPORT_CAN
 			encode_be_uint16(p, (uint16_t)can1.status.tx_count);
 			encode_be_uint16(p + 2, (uint16_t)can1.status.rx_count[0]);
 			encode_be_uint16(p + 4, (uint16_t)(can1.status.rx_ovfl[0] + can1.status.rx_ovfl[1]));
+#else
+			encode_be_uint16(p, 0); // link tx/rx counts live in the usb layer
+			encode_be_uint16(p + 2, (uint16_t)usb_bad);
+			encode_be_uint16(p + 4, (uint16_t)usb_drop);
+#endif
 			encode_be_uint16(p + 6, (uint16_t)errs);
 			can_send(CANMSG_DIAG, p, 8);
 		}
@@ -385,20 +472,25 @@ void Reset_Handler(void) {
 			const struct PhysicsTruth *pt = physics_truth();
 			uint32_t pc = phys_cycles_max;
 			phys_cycles_max = 0;
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u cmd seq %u can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u cmd seq %u ",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
 			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
 			        (unsigned)pt->p_pa, (unsigned)pc,
 			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
-			        (unsigned)sensor_bus.stray,
-			        (unsigned)cmd_state.seq, (unsigned)can1.status.tx_count,
-			        (unsigned)can1.status.rx_count[0],
+			        (unsigned)sensor_bus.stray, (unsigned)cmd_state.seq);
+#ifdef TRANSPORT_CAN
+			tprintf("can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
+			        (unsigned)can1.status.tx_count, (unsigned)can1.status.rx_count[0],
 			        (unsigned)can1.status.lec_count[1], (unsigned)can1.status.lec_count[2],
 			        (unsigned)can1.status.lec_count[3], (unsigned)can1.status.lec_count[4],
 			        (unsigned)can1.status.lec_count[5], (unsigned)can1.status.lec_count[6],
 			        (unsigned)can1.status.lec_count[7]);
+#else
+			tprintf("usb %s bad %u drop %u\n", usb_state_str(usb_state()),
+			        (unsigned)usb_bad, (unsigned)usb_drop);
+#endif
 		}
 	}
 }
@@ -422,6 +514,7 @@ static void tim7(void) {
 static void spi3(void) { spislave_irq(&sensor_bus, &SPI3, DMA1_CH5); }
 static void sensor_cs(void) { spislave_cs_handler(&sensor_bus); }
 
+#ifdef TRANSPORT_CAN
 // FDCAN1 IT0: tx events + errors — drain the event fifo (updates counters).
 static void fdcan1_it0(void) {
 	uint8_t tag;
@@ -441,24 +534,14 @@ static void fdcan1_it1(void) {
 	size_t len = sizeof p;
 	while (fdcan_rx(&can1, &fmi, &header, &len, p, &ts) >= 0) {
 		if (can_header_isext(header)) {
-			uint32_t id29 = can_header_to29(header);
-			if (canmsg_lcc(id29) == CANMSG_LCC_TMC) {
-				switch (canmsg_msgid(id29)) {
-				case CANMSG_CMD_STATE:
-					cmd_store(&cmd_state, p, len);
-					break;
-				case CANMSG_CMD_ENV:
-					cmd_store(&cmd_env, p, len);
-					break;
-				case CANMSG_CMD_NOISE:
-					cmd_store(&cmd_noise, p, len);
-					break;
-				}
-			}
+			host_msg(can_header_to29(header), p, len);
 		}
 		len = sizeof p;
 	}
 }
+#else
+static void usb_lp(void) { usb_recv(&usb_rx); }
+#endif
 
 extern void _estack(void); // top of stack (linker)
 
@@ -483,6 +566,10 @@ __attribute__((section(".isr_vector"))) const isr_t __vectors[NVIC_VECTORS] = {
 	[VECTOR(EXTI1_IRQn)] = sensor_cs,
 	[VECTOR(EXTI2_IRQn)] = sensor_cs,
 	[VECTOR(EXTI3_IRQn)] = sensor_cs,
+#ifdef TRANSPORT_CAN
 	[VECTOR(FDCAN1_IT0_IRQn)] = fdcan1_it0,
 	[VECTOR(FDCAN1_IT1_IRQn)] = fdcan1_it1,
+#else
+	[VECTOR(USB_LP_IRQn)] = usb_lp,
+#endif
 };

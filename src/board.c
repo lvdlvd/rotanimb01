@@ -51,10 +51,15 @@ static const pinconf_t board[] = {
 	PC8_TIM3_CH3 | PIN_PULLDOWN,    //% 40  PC8   TIM3_CH3   AF2  af,pd | PWM in 7
 	PC9_TIM3_CH4 | PIN_PULLDOWN,    //% 41  PC9   TIM3_CH4   AF2  af,pd | PWM in 8
 
+#ifdef TRANSPORT_CAN
 	// FDCAN1 to the host, external transceiver. NOT PB8/PB9: PB8 is BOOT0 and
 	// a transceiver's recessive-high RXD would boot the system loader.
 	PA11_FDCAN1_RX | PIN_PULLUP,    //% 45  PA11  FDCAN1_RX  AF9  af,pu | CAN RX
 	PA12_FDCAN1_TX | PIN_HIGH,      //% 46  PA12  FDCAN1_TX  AF9  af,hi | CAN TX
+#else
+	// TRANSPORT=usb: PA11/PA12 are USB DM/DP — stay analog, the macrocell
+	// drives the pads directly. Same pins, wiring-level either/or with CAN.
+#endif
 };
 
 void board_init(void) {
@@ -64,9 +69,22 @@ void board_init(void) {
 	// sensor bus + SYSCFG for its CS EXTIs; TIM7 comes with M5's scheduler.
 	RCC.AHB1ENR |= RCC_AHB1ENR_DMA1EN | RCC_AHB1ENR_DMAMUX1EN;
 	RCC.AHB2ENR |= RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN;
-	RCC.APB1ENR1 |= RCC_APB1ENR1_TIM2EN | RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_FDCANEN | RCC_APB1ENR1_SPI3EN;
+	RCC.APB1ENR1 |= RCC_APB1ENR1_TIM2EN | RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_SPI3EN;
 	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_SYSCFGEN;
+#ifdef TRANSPORT_CAN
+	RCC.APB1ENR1 |= RCC_APB1ENR1_FDCANEN;
 	rcc_ccipr_fdcansel_set(2); // FDCAN kernel clock = PCLK1 (168 MHz: /12 -> 14 tq at 1 Mbit)
+#else
+	// UCPD dead-battery pull-downs load the USB pins out of reset: disable
+	RCC.APB1ENR1 |= RCC_APB1ENR1_PWREN;
+	PWR.CR3 |= PWR_CR3_UCPD1_DBDIS;
+	RCC.CRRCR |= RCC_CRRCR_HSI48ON; // USB kernel clock: HSI48, CRS-trimmed on SOF
+	while (!(RCC.CRRCR & RCC_CRRCR_HSI48RDY)) {
+	}
+	rcc_ccipr_clk48sel_set(0);
+	RCC.APB1ENR1 |= RCC_APB1ENR1_USBEN | RCC_APB1ENR1_CRSEN;
+	CRS.CR |= CRS_CR_AUTOTRIMEN | CRS_CR_CEN;
+#endif
 
 	gpioConfigAll(board, sizeof board / sizeof board[0]);
 }

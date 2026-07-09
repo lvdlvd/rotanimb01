@@ -5,8 +5,8 @@
 // against the four register-file models:
 //
 //   jumpers:  PA5 -> PC10 (SCK)   PA7 -> PC12 (MOSI)   PA6 -> PC11 (MISO)
-//             PB0 -> PC0 (CS baro)   PB1 -> PC1  (CS mag)
-//             PA2 -> PA4 (CS gyro)   PA3 -> PB12 (CS accel)
+//             PB0 -> PC0 (CS baro)   PB1 -> PC1 (CS mag)
+//             PA2 -> PC2 (CS gyro)   PA3 -> PC3 (CS accel)
 //
 // Per device: probe (chip id / whoami), self-test dialogue, soft reset,
 // configuration with readback verification, then a data read checked for
@@ -445,10 +445,10 @@ static const struct {
 	uint8_t prio;
 } irqprios[] = {
 	{SPI3_IRQn, PRIO(0, 0)},      // byte-0 cmd decode, ~72-cycle deadline
-	{EXTI0_IRQn, PRIO(0, 1)},     // CS baro
-	{EXTI1_IRQn, PRIO(0, 1)},     // CS mag
-	{EXTI4_IRQn, PRIO(0, 1)},     // CS gyro
-	{EXTI15_10_IRQn, PRIO(0, 1)}, // CS accel
+	{EXTI0_IRQn, PRIO(0, 1)}, // CS baro
+	{EXTI1_IRQn, PRIO(0, 1)}, // CS mag
+	{EXTI2_IRQn, PRIO(0, 1)}, // CS gyro
+	{EXTI3_IRQn, PRIO(0, 1)}, // CS accel
 
 	{DMA1_CH3_IRQn, PRIO(1, 0)}, // master SPI1 RX done
 
@@ -464,8 +464,8 @@ static const pinconf_t master_pins[] = {
 	PA7_SPI1_MOSI | PIN_HIGH,     //% master MOSI, jumper to PC12
 	PB0 | PIN_OUTPUT | PIN_HIGH,  //% CS baro out, jumper to PC0
 	PB1 | PIN_OUTPUT | PIN_HIGH,  //% CS mag out, jumper to PC1
-	PA2 | PIN_OUTPUT | PIN_HIGH,  //% CS gyro out, jumper to PA4
-	PA3 | PIN_OUTPUT | PIN_HIGH,  //% CS accel out, jumper to PB12
+	PA2 | PIN_OUTPUT | PIN_HIGH,  //% CS gyro out, jumper to PC2
+	PA3 | PIN_OUTPUT | PIN_HIGH,  //% CS accel out, jumper to PC3
 };
 
 void Reset_Handler(void) __attribute__((noreturn));
@@ -499,17 +499,20 @@ void Reset_Handler(void) {
 	TIM7.ARR = 0xFFFF;
 	TIM7.CR1 = TIM_BASIC_INST_CR1_CEN;
 
+	// report a crash from the previous run BEFORE re-entering the bring-up
+	// that may have caused it (a boot-time assert would reset-loop silently
+	// if this ran after)
+	fault_report(cputc);
+
 	// the slave side, exactly as the harness runs it
 	dma_set_mux(DMA1_CH5, DMA_REQ_SPI3_TX);
 	sensors_init();
-	exti_init(CS_BARO | CS_MAG, true, true);
-	exti_init(CS_GYRO, true, true);
-	exti_init(CS_ACC, true, true);
+	exti_init(CS_BARO | CS_MAG | CS_GYRO | CS_ACC, true, true);
 	nvic_enable(SPI3_IRQn);
 	nvic_enable(EXTI0_IRQn);
 	nvic_enable(EXTI1_IRQn);
-	nvic_enable(EXTI4_IRQn);
-	nvic_enable(EXTI15_10_IRQn);
+	nvic_enable(EXTI2_IRQn);
+	nvic_enable(EXTI3_IRQn);
 
 	// the master: 1.3 MHz, the no-dummy protocols' measured clean domain
 	dma_set_mux(DMA1_CH3, DMA_REQ_SPI1_RX);
@@ -517,9 +520,8 @@ void Reset_Handler(void) {
 	spiq_init(&spiq, &SPI1, SPI_CR1_BR_Div128, DMA1_CH3, DMA1_CH4, spi1_ss);
 	nvic_enable(DMA1_CH3_IRQn);
 
-	fault_report(cputc);
-	tprintf("\nM4a sensor-model self-test, sysclk %u Hz, bus %u Hz\n"
-	        "jumpers: PA5>PC10 PA7>PC12 PA6>PC11 PB0>PC0 PB1>PC1 PA2>PA4 PA3>PB12\n",
+	tprintf("\nM4a+M4b sensor-model self-test, sysclk %u Hz, bus %u Hz\n"
+	        "jumpers: PA5>PC10 PA7>PC12 PA6>PC11 PB0>PC0 PB1>PC1 PA2>PC2 PA3>PC3\n",
 	        (unsigned)clock_sysclk_hz(), 168000000u / 128);
 
 	test_gyro();
@@ -565,6 +567,6 @@ __attribute__((section(".isr_vector"))) const isr_t __vectors[NVIC_VECTORS] = {
 	[VECTOR(SPI3_IRQn)] = spi3,
 	[VECTOR(EXTI0_IRQn)] = sensor_cs,
 	[VECTOR(EXTI1_IRQn)] = sensor_cs,
-	[VECTOR(EXTI4_IRQn)] = sensor_cs,
-	[VECTOR(EXTI15_10_IRQn)] = sensor_cs,
+	[VECTOR(EXTI2_IRQn)] = sensor_cs,
+	[VECTOR(EXTI3_IRQn)] = sensor_cs,
 };

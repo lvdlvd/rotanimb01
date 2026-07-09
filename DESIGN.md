@@ -154,19 +154,15 @@ and M3 measures it before anything depends on it.
 
 | Signal        | Pin  | Function        | Notes                        |
 |---------------|------|-----------------|------------------------------|
-| GYRO CS (v3)  | PA4  | GPIO in, EXTI4  | v2 role: SPI1_NSS AF5        |
-| GYRO SCK      | PA5  | SPI1_SCK AF5    |                              |
-| GYRO MISO     | PA6  | SPI1_MISO AF5   | tied w/ PB14, PC11 → DUT MISO|
-| GYRO MOSI     | PA7  | SPI1_MOSI AF5   |                              |
-| ACC CS (v3)   | PB12 | GPIO in, EXTI12 | v2 role: SPI2_NSS AF5        |
-| ACC SCK       | PB13 | SPI2_SCK AF5    |                              |
-| ACC MISO      | PB14 | SPI2_MISO AF5   |                              |
-| ACC MOSI      | PB15 | SPI2_MOSI AF5   |                              |
-| BARO/MAG SCK  | PC10 | SPI3_SCK AF6    | shared slave, SSM            |
-| BARO/MAG MISO | PC11 | SPI3_MISO AF6   |                              |
-| BARO/MAG MOSI | PC12 | SPI3_MOSI AF6   |                              |
-| CS baro       | PC0  | GPIO in, EXTI0  |                              |
-| CS mag        | PC1  | GPIO in, EXTI1  |                              |
+| BUS SCK       | PC10 | SPI3_SCK AF6    | one shared slave, SSM (v3)   |
+| BUS MISO      | PC11 | SPI3_MISO AF6   |                              |
+| BUS MOSI      | PC12 | SPI3_MOSI AF6   |                              |
+| CS baro       | PC0  | GPIO in, EXTI0  | all four CS on one port: the |
+| CS mag        | PC1  | GPIO in, EXTI1  | CS handler demuxes with a    |
+| CS gyro       | PC2  | GPIO in, EXTI2  | single IDR read (engine      |
+| CS accel      | PC3  | GPIO in, EXTI3  | contract), 4 dedicated vecs  |
+| (reserved)    | PA4–PA7   | analog    | v2 SPI1 slave: hybrid fallback|
+| (reserved)    | PB12–PB15 | analog    | v2 SPI2 slave: hybrid fallback|
 | DRDY accel    | PC4  | GPIO out        | BMI088 INT1                  |
 | DRDY gyro     | PC5  | GPIO out        | BMI088 INT3                  |
 | DRDY baro     | PB6  | GPIO out        | BMP390 INT                   |
@@ -185,16 +181,18 @@ fragile, and wrong on every fresh chip). FDCAN1 on PA11/PA12 (AF9)
 avoids this entirely; PA11/PA12's only competing role is USB, unused
 here. Leave PB8 unconnected or strapped low.
 
-~33 of 52 GPIOs, no AF conflicts. All four EXTI lines in use (0, 1, 4,
-12) are distinct — each gets its own vector, no shared-line demux. EXTI
-on PA4/PB12 coexists with the hardware-NSS AF (EXTI watches the pin
-state regardless of mode); those two are *low-priority* frame-end
-bookkeeping (predictor re-arm, stats), not on the deadline path.
+~25 of 52 GPIOs, no AF conflicts. The four CS EXTI lines (0–3) each get
+a dedicated single-line vector, no shared-line demux — and all four CS
+sit on port C because spislave's CS handler arbitrates from ONE IDR
+read (spislave_init asserts this; the v3 first draft scattered them
+over three ports and reset-looped on that assert before the console
+could say so — hence fault_report now runs before sensors_init).
 
-**DUT harness wiring:** SCK fans out to PA5/PB13/PC10, MOSI to
-PA7/PB15/PC12; the DUT's four CS lines go one each to PA4, PB12, PC0,
-PC1; the three MISOs (PA6/PB14/PC11) are tied together onto the DUT's
-MISO. That tie requires each *deselected* slave to tri-state MISO —
+**DUT harness wiring (v3):** the DUT's one bus wires SCK → PC10,
+MOSI → PC12, MISO ← PC11; its four CS lines go to PC0 (baro), PC1
+(mag), PC2 (gyro), PC3 (accel); four DRDY lines back. 11 signal wires
+total. In the fallback hybrid, MISOs would be tied — that tie requires
+each *deselected* slave to tri-state MISO —
 whether the G4's SPI IP releases MISO on NSS-high is a bring-up
 verification item (M3 assertion). Fallback, in order: EXTI flips the
 deselected MISOs to analog (the whole address byte of latency is

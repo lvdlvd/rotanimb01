@@ -12,11 +12,12 @@
 #define LED PC13
 
 // DUT-driven chip selects, all four demuxed on the shared SPI3 slave
-// (v3 topology): GPIO inputs on distinct EXTI lines.
-#define CS_BARO PC0  // EXTI0
-#define CS_MAG	PC1  // EXTI1
-#define CS_GYRO PA4  // EXTI4
-#define CS_ACC	PB12 // EXTI12 (shared EXTI15_10 vector)
+// (v3 topology). One port (the CS handler reads a single IDR — engine
+// contract), four dedicated single-line EXTI vectors.
+#define CS_BARO PC0 // EXTI0
+#define CS_MAG	PC1 // EXTI1
+#define CS_GYRO PC2 // EXTI2
+#define CS_ACC	PC3 // EXTI3
 
 // Data-ready outputs to the DUT, driven per each device's INT config.
 #define DRDY_ACC  PC4 // BMI088 INT1

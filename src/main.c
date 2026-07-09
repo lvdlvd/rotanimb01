@@ -95,10 +95,10 @@ static const struct {
 	uint8_t prio;
 } irqprios[] = {
 	{SPI3_IRQn, PRIO(0, 0)},      // byte-0 cmd decode, ~72-cycle deadline
-	{EXTI0_IRQn, PRIO(0, 1)},     // CS baro: dummy pre-stuff / deselect scrub
-	{EXTI1_IRQn, PRIO(0, 1)},     // CS mag
-	{EXTI4_IRQn, PRIO(0, 1)},     // CS gyro
-	{EXTI15_10_IRQn, PRIO(0, 1)}, // CS accel
+	{EXTI0_IRQn, PRIO(0, 1)}, // CS baro: dummy pre-stuff / deselect scrub
+	{EXTI1_IRQn, PRIO(0, 1)}, // CS mag
+	{EXTI2_IRQn, PRIO(0, 1)}, // CS gyro
+	{EXTI3_IRQn, PRIO(0, 1)}, // CS accel
 
 	{TIM2_IRQn, PRIO(1, 0)}, // PWM capture ch1-4 (µs timestamps)
 	{TIM3_IRQn, PRIO(1, 0)}, // PWM capture ch5-8
@@ -234,17 +234,20 @@ void Reset_Handler(void) {
 	nvic_enable(FDCAN1_IT0_IRQn);
 	nvic_enable(FDCAN1_IT1_IRQn);
 
+	// report a crash from the previous run BEFORE re-entering the bring-up
+	// that may have caused it (a boot-time assert would reset-loop silently
+	// if this ran after)
+	fault_report(cputc);
+
 	// the SPI3 sensor bus: four register-file devices, CS demux on EXTI
 	dma_set_mux(DMA1_CH5, DMA_REQ_SPI3_TX);
 	sensors_init();
-	exti_init(CS_BARO | CS_MAG, true, true);
-	exti_init(CS_GYRO, true, true);
-	exti_init(CS_ACC, true, true);
+	exti_init(CS_BARO | CS_MAG | CS_GYRO | CS_ACC, true, true);
 	nvic_enable(SPI3_IRQn);
 	nvic_enable(EXTI0_IRQn);
 	nvic_enable(EXTI1_IRQn);
-	nvic_enable(EXTI4_IRQn);
-	nvic_enable(EXTI15_10_IRQn);
+	nvic_enable(EXTI2_IRQn);
+	nvic_enable(EXTI3_IRQn);
 
 	DCB_DEMCR |= 1u << 24; // TRCENA
 	DWT_CTRL |= 1u;        // CYCCNTENA
@@ -258,7 +261,6 @@ void Reset_Handler(void) {
 	TIM7.CR1 = TIM_BASIC_INST_CR1_CEN;
 	nvic_enable(TIM7_DAC2_4_IRQn);
 
-	fault_report(cputc); // print a crash from the previous run, if any
 	tprintf("\nrotanimb01 HITL harness on STM32G474, sysclk = %u Hz, hse = %u Hz, can kernel = %u Hz, srcid %02x\n",
 	        (unsigned)clock_sysclk_hz(), (unsigned)clock_hse_hz, (unsigned)clock_fdcan_hz(), srcid);
 
@@ -479,8 +481,8 @@ __attribute__((section(".isr_vector"))) const isr_t __vectors[NVIC_VECTORS] = {
 	[VECTOR(SPI3_IRQn)] = spi3,
 	[VECTOR(EXTI0_IRQn)] = sensor_cs,
 	[VECTOR(EXTI1_IRQn)] = sensor_cs,
-	[VECTOR(EXTI4_IRQn)] = sensor_cs,
-	[VECTOR(EXTI15_10_IRQn)] = sensor_cs,
+	[VECTOR(EXTI2_IRQn)] = sensor_cs,
+	[VECTOR(EXTI3_IRQn)] = sensor_cs,
 	[VECTOR(FDCAN1_IT0_IRQn)] = fdcan1_it0,
 	[VECTOR(FDCAN1_IT1_IRQn)] = fdcan1_it1,
 };

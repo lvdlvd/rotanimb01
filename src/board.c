@@ -1,8 +1,8 @@
 // rotanimb01 board pinout and bring-up (roles in board.h, rationale in
-// ../DESIGN.md). The harness is the SPI *slave* on all three sensor buses:
-// SPI1 = BMI088 gyro, SPI2 = BMI088 accel (hardware NSS each), SPI3 = BMP390 +
-// RM3100 shared (SSM, CS demux on PC0/PC1 EXTI). TIM2/TIM3 capture 8 PWM
-// outputs of the DUT; FDCAN1 talks to the host.
+// ../DESIGN.md, v3 topology). The harness serves all four devices on ONE
+// SPI3 slave (SSM), demuxed by four CS inputs on PC0..PC3 (both-edge EXTI).
+// SPI1/SPI2 pins stay reserved (analog) as the hybrid fallback. TIM2/TIM3
+// capture 8 PWM outputs of the DUT; FDCAN1 talks to the host.
 
 #include "board.h"
 
@@ -22,25 +22,16 @@ static const pinconf_t board[] = {
 	PA9_USART1_TX | PIN_HIGH,       //% 43  PA9   USART1_TX  AF7  af,hi | ST-Link VCP TX
 	PA10_USART1_RX | PIN_PULLUP,    //% 44  PA10  USART1_RX  AF7  af,pu | ST-Link VCP RX
 
-	// SPI1 slave = BMI088 gyro die. Hardware NSS from the DUT's gyro CS.
-	PA4_SPI1_NSS | PIN_PULLUP,      //% 18  PA4   SPI1_NSS   AF5  af,pu | DUT CS gyro (idle deselected)
-	PA5_SPI1_SCK | PIN_PULLDOWN,    //% 19  PA5   SPI1_SCK   AF5  af,pd | from DUT SCK
-	PA6_SPI1_MISO | PIN_HIGH,       //% 20  PA6   SPI1_MISO  AF5  af,hi | tied w/ PB14, PC11 onto DUT MISO
-	PA7_SPI1_MOSI | PIN_PULLDOWN,   //% 21  PA7   SPI1_MOSI  AF5  af,pd | from DUT MOSI
-
-	// SPI2 slave = BMI088 accel die. Hardware NSS from the DUT's accel CS.
-	PB12_SPI2_NSS | PIN_PULLUP,     //% 34  PB12  SPI2_NSS   AF5  af,pu | DUT CS accel (idle deselected)
-	PB13_SPI2_SCK | PIN_PULLDOWN,   //% 35  PB13  SPI2_SCK   AF5  af,pd | from DUT SCK
-	PB14_SPI2_MISO | PIN_HIGH,      //% 36  PB14  SPI2_MISO  AF5  af,hi | tied w/ PA6, PC11 onto DUT MISO
-	PB15_SPI2_MOSI | PIN_PULLDOWN,  //% 37  PB15  SPI2_MOSI  AF5  af,pd | from DUT MOSI
-
-	// SPI3 slave = BMP390 + RM3100 shared (SSM permanently selected; the two
-	// CS lines are plain inputs here, both-edge EXTI demux from M3 on).
+	// SPI3 slave = the whole sensor bus (v3): all four devices demuxed by
+	// their CS inputs, one port, both-edge EXTI. SPI1/SPI2 pins (PA4-PA7,
+	// PB12-PB15) stay in the analog blanket: reserved hybrid fallback.
 	PC10_SPI3_SCK | PIN_PULLDOWN,   //% 52  PC10  SPI3_SCK   AF6  af,pd | from DUT SCK
-	PC11_SPI3_MISO | PIN_HIGH,      //% 53  PC11  SPI3_MISO  AF6  af,hi | tied w/ PA6, PB14 onto DUT MISO
+	PC11_SPI3_MISO | PIN_HIGH,      //% 53  PC11  SPI3_MISO  AF6  af,hi | to DUT MISO
 	PC12_SPI3_MOSI | PIN_PULLDOWN,  //% 54  PC12  SPI3_MOSI  AF6  af,pd | from DUT MOSI
 	PC0 | PIN_INPUT | PIN_PULLUP,   //%  8  PC0   GPIO       -    in,pu | DUT CS baro = CS_BARO (EXTI0)
 	PC1 | PIN_INPUT | PIN_PULLUP,   //%  9  PC1   GPIO       -    in,pu | DUT CS mag = CS_MAG (EXTI1)
+	PC2 | PIN_INPUT | PIN_PULLUP,   //% 10  PC2   GPIO       -    in,pu | DUT CS gyro = CS_GYRO (EXTI2)
+	PC3 | PIN_INPUT | PIN_PULLUP,   //% 11  PC3   GPIO       -    in,pu | DUT CS accel = CS_ACC (EXTI3)
 
 	// Data-ready outputs to the DUT (reset low = inactive for the default
 	// active-high INT configs; polarity follows the DUT's INT config writes).

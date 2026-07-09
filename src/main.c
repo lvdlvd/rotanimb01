@@ -7,9 +7,15 @@
 //
 // CAN dictionary: 29-bit bit-field headers and big-endian payloads per the
 // shared in-house convention — layout and the harness's MSGID allocation
-// (the 0x40 block, both LCCs) in canmsg.h. Commands are stored raw here;
-// interpretation (lag filters, physics) is M5. Stale-command watchdog: no
-// CMD_STATE for 1 s -> hold, flag in STATUS.
+// (the 0x40 block, both LCCs) in canmsg.h.
+//
+// M5: TIM7 ticks at 10 kHz; the main loop consumes ticks and runs the table
+// scheduler — physics integration on every 5th tick (2 kHz), and a Bresenham
+// rate accumulator per device (acc += hz; acc >= 10000 -> sample) so any
+// configured ODR is served with <= 100 us jitter and an exact long-term
+// rate. Samples pull the physics truth, quantize per the LIVE config
+// registers and commit. CMD_STATE/CMD_ENV decode into the lag targets;
+// stale watchdog: no CMD_STATE for 1 s -> hold last state, flag in STATUS.
 
 #include "device.h" // generated for STM32G474
 #include "pinmux.h"
@@ -24,6 +30,9 @@
 #include "fdcan.h"
 #include "gpio.h"
 #include "nvic.h"
+#include "physics.h"
+
+#include <math.h>
 #include "pwm.h"
 #include "sensors.h"
 #include "startup.h"
@@ -97,11 +106,99 @@ static const struct {
 	{FDCAN1_IT0_IRQn, PRIO(1, 1)}, // TX events, bus-off
 	{FDCAN1_IT1_IRQn, PRIO(1, 1)}, // RX: command mailboxes
 
+	{TIM7_DAC2_4_IRQn, PRIO(2, 1)}, // 10 kHz scheduler tick (counter only)
+
 	{DMA1_CH1_IRQn, PRIO(2, 0)}, // console TX DMA
 	{DMA1_CH2_IRQn, PRIO(2, 0)}, // console RX DMA
 	{USART1_IRQn, PRIO(2, 0)},   // console TX kick / RX idle flush
 };
 #undef PRIO
+
+// ---- the 10 kHz scheduler tick ----------------------------------------------
+static volatile uint32_t tim7_ticks;
+
+// DWT cycle counter: measure the physics step on the real core (heartbeat
+// reports the max per interval — the flight branch costs more than bench)
+#define DWT_CTRL (*(volatile uint32_t *)0xE0001000)
+#define DWT_CYCCNT (*(volatile uint32_t *)0xE0001004)
+#define DCB_DEMCR (*(volatile uint32_t *)0xE000EDFC)
+static uint32_t phys_cycles_max;
+
+static int16_t sat16(float x) {
+	if (x > 32767.0f) {
+		return 32767;
+	}
+	if (x < -32767.0f) {
+		return -32767;
+	}
+	return (int16_t)x;
+}
+
+// pull the physics truth, quantize per the live configs, commit
+static void sample_gyro(uint32_t now) {
+	const struct PhysicsTruth *t = physics_truth();
+	float lsb = 32767.0f / gyro_fullscale_dps(); // counts per deg/s
+	int16_t xyz[3];
+	for (int i = 0; i < 3; i++) {
+		xyz[i] = sat16(t->rate[i] * (180.0f / (float)M_PI) * lsb);
+	}
+	gyro_commit(xyz, now);
+}
+
+static void sample_accel(void) {
+	const struct PhysicsTruth *t = physics_truth();
+	float lsb = 32767.0f / (accel_fullscale_g() * PHYSICS_G); // counts per m/s^2
+	int16_t xyz[3];
+	for (int i = 0; i < 3; i++) {
+		xyz[i] = sat16(t->sforce[i] * lsb);
+	}
+	accel_commit(xyz, t->t_degc);
+}
+
+static void sample_mag(void) {
+	const struct PhysicsTruth *t = physics_truth();
+	float lsb = mag_lsb_per_ut();
+	int32_t xyz[3];
+	for (int i = 0; i < 3; i++) {
+		xyz[i] = (int32_t)(t->mag[i] * lsb);
+	}
+	mag_commit(xyz);
+}
+
+// ---- host command decode (big-endian, canmsg.h dictionary) -------------------
+
+static bool cmd_snapshot(struct CmdBox *b, uint8_t p[8], uint32_t *seq) {
+	uint32_t s;
+	do { // seq-stable copy against the RX irq
+		s = b->seq;
+		for (int i = 0; i < 8; i++) {
+			p[i] = b->data[i];
+		}
+	} while (b->seq != s);
+	if (s == *seq || b->len < 8) {
+		return false;
+	}
+	*seq = s;
+	return true;
+}
+
+static void cmd_decode(void) {
+	static uint32_t seq_state, seq_env;
+	uint8_t p[8];
+	if (cmd_snapshot(&cmd_state, p, &seq_state)) {
+		// V cm/s i16, hdot cm/s i16, psidot mrad/s i16, flags u16
+		physics_cmd((int16_t)decode_be_uint16(p) * 0.01f,
+		            (int16_t)decode_be_uint16(p + 2) * 0.01f,
+		            (int16_t)decode_be_uint16(p + 4) * 0.001f);
+	}
+	if (cmd_snapshot(&cmd_env, p, &seq_env)) {
+		// QNH Pa/10 u16, T0 0.1 K u16, B 0.01 uT u16, incl 0.01 deg i16
+		physics_env(decode_be_uint16(p) * 10.0f,
+		            decode_be_uint16(p + 2) * 0.1f,
+		            decode_be_uint16(p + 4) * 0.01f,
+		            (int16_t)decode_be_uint16(p + 6) * 0.01f * ((float)M_PI / 180.0f));
+	}
+}
 
 void Reset_Handler(void) __attribute__((noreturn));
 void Reset_Handler(void) {
@@ -149,6 +246,18 @@ void Reset_Handler(void) {
 	nvic_enable(EXTI4_IRQn);
 	nvic_enable(EXTI15_10_IRQn);
 
+	DCB_DEMCR |= 1u << 24; // TRCENA
+	DWT_CTRL |= 1u;        // CYCCNTENA
+
+	// the 10 kHz scheduler tick
+	physics_init();
+	RCC.APB1ENR1 |= RCC_APB1ENR1_TIM7EN;
+	TIM7.PSC = (uint16_t)(clock_pclk1_timer_hz() / 1000000 - 1); // 1 MHz
+	TIM7.ARR = 100 - 1;                                          // 10 kHz
+	TIM7.DIER = TIM_BASIC_INST_DIER_UIE;
+	TIM7.CR1 = TIM_BASIC_INST_CR1_CEN;
+	nvic_enable(TIM7_DAC2_4_IRQn);
+
 	fault_report(cputc); // print a crash from the previous run, if any
 	tprintf("\nrotanimb01 HITL harness on STM32G474, sysclk = %u Hz, hse = %u Hz, can kernel = %u Hz, srcid %02x\n",
 	        (unsigned)clock_sysclk_hz(), (unsigned)clock_hse_hz, (unsigned)clock_fdcan_hz(), srcid);
@@ -172,32 +281,42 @@ void Reset_Handler(void) {
 
 		uint32_t now = now_us();
 		sensors_poll(now);
+		cmd_decode();
 
-		// Static bench-cal sampler until M5's physics: 1 g down, zero rates,
-		// mid-latitude field, ISA sea level — at each device's LIVE config
-		// rate. The M5 scheduler replaces this loop.
+		// the table scheduler: consume 10 kHz ticks; physics every 5th
+		// (2 kHz), Bresenham accumulator per device for any configured ODR
 		{
-			static uint32_t t_g, t_a, t_b, t_m;
-			uint32_t hz;
-			if ((hz = gyro_rate_hz()) != 0 && now - t_g >= 1000000u / hz) {
-				t_g = now;
-				const int16_t zero[3] = {0, 0, 0};
-				gyro_commit(zero, now);
-			}
-			if ((hz = accel_rate_hz()) != 0 && now - t_a >= 1000000u / hz) {
-				t_a = now;
-				int16_t g1[3] = {0, 0, (int16_t)(32767.0f / accel_fullscale_g())}; // +1 g on Z
-				accel_commit(g1, 25.0f);
-			}
-			if ((hz = baro_rate_hz()) != 0 && now - t_b >= 1000000u / hz) {
-				t_b = now;
-				baro_commit(15.0f, 101325.0);
-			}
-			if ((hz = mag_rate_hz()) != 0 && now - t_m >= 1000000u / hz) {
-				t_m = now;
-				float lsb = mag_lsb_per_ut();
-				int32_t field[3] = {(int32_t)(20.0f * lsb), 0, (int32_t)(44.0f * lsb)}; // ~48 uT, incl 65 deg
-				mag_commit(field);
+			static uint32_t done;
+			static uint32_t phys_div, acc_g, acc_a, acc_b, acc_m;
+			while (done != tim7_ticks) {
+				done++;
+				if (++phys_div >= 5) {
+					phys_div = 0;
+					uint32_t c0 = DWT_CYCCNT;
+					physics_step(5 * 100e-6f);
+					uint32_t c = DWT_CYCCNT - c0;
+					if (c > phys_cycles_max) {
+						phys_cycles_max = c;
+					}
+				}
+				uint32_t hz;
+				if ((hz = gyro_rate_hz()) != 0 && (acc_g += hz) >= 10000) {
+					acc_g -= 10000;
+					sample_gyro(now);
+				}
+				if ((hz = accel_rate_hz()) != 0 && (acc_a += hz) >= 10000) {
+					acc_a -= 10000;
+					sample_accel();
+				}
+				if ((hz = baro_rate_hz()) != 0 && (acc_b += hz) >= 10000) {
+					acc_b -= 10000;
+					const struct PhysicsTruth *t = physics_truth();
+					baro_commit(t->t_degc, t->p_pa);
+				}
+				if ((hz = mag_rate_hz()) != 0 && (acc_m += hz) >= 10000) {
+					acc_m -= 10000;
+					sample_mag();
+				}
 			}
 		}
 
@@ -233,10 +352,14 @@ void Reset_Handler(void) {
 		if ((int32_t)(now - t_status) >= 100000) { // STATUS 10 Hz
 			t_status = now;
 			bool stale = cmd_state.seq == 0 || now - cmd_state.rx_us > 1000000;
+			float psi_deg = physics_truth()->psi * (180.0f / (float)M_PI);
+			if (psi_deg < 0) {
+				psi_deg += 360.0f;
+			}
 			uint8_t p[8];
 			encode_be_uint32(p, now);
-			encode_be_uint16(p + 4, 0); // psi 0.01deg: physics lands at M5
-			encode_be_uint16(p + 6, (uint16_t)(stale ? 1 : 0)); // flags, bit0 = cmd stale
+			encode_be_uint16(p + 4, (uint16_t)(psi_deg * 100.0f)); // psi 0.01 deg
+			encode_be_uint16(p + 6, (uint16_t)((stale ? 1 : 0) | physics_flags()));
 			can_send(CANMSG_STATUS, p, 8);
 		}
 
@@ -257,8 +380,13 @@ void Reset_Handler(void) {
 		if ((int32_t)(now - t_tick) >= 1000000) { // console heartbeat 1 Hz
 			t_tick = now;
 			digitalToggle(LED);
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u spi g/a/b/m %u/%u/%u/%u unexp %u stray %u cmd seq %u can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
+			const struct PhysicsTruth *pt = physics_truth();
+			uint32_t pc = phys_cycles_max;
+			phys_cycles_max = 0;
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u cmd seq %u can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
+			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
+			        (unsigned)pt->p_pa, (unsigned)pc,
 			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
@@ -283,6 +411,10 @@ static void usart1(void) {
 
 static void tim2(void) { pwmin_irq_handler(&cap2); }
 static void tim3(void) { pwmin_irq_handler(&cap3); }
+static void tim7(void) {
+	TIM7.SR = 0; // w0c UIF
+	tim7_ticks++;
+}
 
 // the sensor bus: byte-0 deadline path inlined with constant instances
 static void spi3(void) { spislave_irq(&sensor_bus, &SPI3, DMA1_CH5); }
@@ -343,6 +475,7 @@ __attribute__((section(".isr_vector"))) const isr_t __vectors[NVIC_VECTORS] = {
 	[VECTOR(USART1_IRQn)] = usart1,
 	[VECTOR(TIM2_IRQn)] = tim2,
 	[VECTOR(TIM3_IRQn)] = tim3,
+	[VECTOR(TIM7_DAC2_4_IRQn)] = tim7,
 	[VECTOR(SPI3_IRQn)] = spi3,
 	[VECTOR(EXTI0_IRQn)] = sensor_cs,
 	[VECTOR(EXTI1_IRQn)] = sensor_cs,

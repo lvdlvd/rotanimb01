@@ -16,7 +16,7 @@ OBJCOPY = $(PREFIX)objcopy
 SIZE    = $(PREFIX)size
 
 ARCH    = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
-CFLAGS  = -std=gnu23 -O2 -g3 -ffreestanding -ffunction-sections -fdata-sections \
+CFLAGS  = -std=gnu23 -O2 -g3 -DPRINTF_ENABLE_FLOAT -ffreestanding -ffunction-sections -fdata-sections \
           $(ARCH) -Wall -Wextra -Wno-pedantic -I../src -I../bmp390inv -I$(LIB)
 LDFLAGS = -nostartfiles -lm -lnosys $(ARCH) -T ../src/$(MEMTARGET).ld -Wl,-L,../src -Wl,-L,$(LIB) \
           -Wl,--gc-sections,-Map,selftest.map

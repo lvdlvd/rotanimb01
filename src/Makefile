@@ -15,7 +15,7 @@ OBJCOPY = $(PREFIX)objcopy
 SIZE    = $(PREFIX)size
 
 ARCH    = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
-CFLAGS  = -std=gnu23 -O2 -g3 -ffreestanding -ffunction-sections -fdata-sections \
+CFLAGS  = -std=gnu23 -O2 -g3 -DPRINTF_ENABLE_FLOAT -ffreestanding -ffunction-sections -fdata-sections \
           $(ARCH) -Wall -Wextra -Wno-pedantic -I. -I../physics -I../bmp390inv -I$(LIB)
 LDFLAGS = -nostartfiles -lm -lnosys $(ARCH) -T $(MEMTARGET).ld -Wl,-L,. -Wl,-L,$(LIB) \
           -Wl,--gc-sections,-Map,rotanimb01.map

@@ -259,7 +259,7 @@ static void test_accel(void) {
 
 static void test_baro(void) {
 	tprintf("baro:");
-	CHECK(rreg(DEV_BARO, 0x00) == 0x60, "chip id");
+	CHECK(rreg(DEV_BARO, 0x00) == 0x50, "chip id"); // BMP388, like the bench part
 	// the NVM trim must serialize exactly as the model's trim
 	uint8_t trim[21], want[21];
 	rregs(DEV_BARO, 0x31, trim, 21);

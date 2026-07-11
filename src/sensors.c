@@ -239,7 +239,7 @@ static void baro_reset(struct SPIDev *d) {
 	for (int i = 0; i < SPIDEV_REGS; i++) {
 		d->reg[i] = 0;
 	}
-	d->reg[B_CHIP_ID] = 0x60;
+	d->reg[B_CHIP_ID] = 0x50; // BMP388, like the bench part (BMP390 = 0x60)
 	d->reg[B_REV_ID] = 0x01;
 	d->reg[B_STATUS] = 0x10;  // cmd_rdy
 	d->reg[B_EVENT] = 0x01;   // por_detected
@@ -266,13 +266,14 @@ static void mag_reset(struct SPIDev *d) {
 
 // ---- the bus ----------------------------------------------------------------
 
-// the synthetic trim baked into the served NVM; replace with a real dump when
-// one is read out (bmp390inv golden validates the inversion for any trim)
+// the REAL trim of the bench BMP388 (BCLBR dump 2026-07-12: 219 106 129 73
+// 246 66 253 123 243 35 0 51 103 179 124 243 246 49 65 11 196) — the
+// emulated NVM is byte-identical to the actual part on the bench
 const struct BMP390Trim baro_trim = {
-	.par_t1 = 27000, .par_t2 = 18000, .par_t3 = -10,
-	.par_p1 = 21400, .par_p2 = 16100, .par_p3 = 5, .par_p4 = -3,
-	.par_p5 = 7000, .par_p6 = 1400, .par_p7 = 20, .par_p8 = -5,
-	.par_p9 = 6000, .par_p10 = 3, .par_p11 = -2,
+	.par_t1 = 27355, .par_t2 = 18817, .par_t3 = -10,
+	.par_p1 = -702, .par_p2 = -3205, .par_p3 = 35, .par_p4 = 0,
+	.par_p5 = 26419, .par_p6 = 31923, .par_p7 = -13, .par_p8 = -10,
+	.par_p9 = 16689, .par_p10 = 11, .par_p11 = -60,
 };
 static struct BMP390Cal baro_cal;
 

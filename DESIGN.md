@@ -102,11 +102,11 @@ first response bit shifts out roughly **one bit-time** later. This is
 protocol physics — no number of SPI peripherals or MCUs removes it.
 The budget at 170 MHz:
 
-| SPI clock | 1 bit  | 1 byte  | cycles/bit | cycles/byte |
-|-----------|--------|---------|------------|-------------|
-| 10 MHz    | 100 ns | 800 ns  | 17         | 136         |
-| 2 MHz     | 500 ns | 4 µs    | 85         | 680         |
-| 1 MHz     | 1 µs   | 8 µs    | 170        | 1360        |
+| SPI clock | 1 bit  | 1 byte | cycles/bit | cycles/byte |
+| --------- | ------ | ------ | ---------- | ----------- |
+| 10 MHz    | 100 ns | 800 ns | 17         | 136         |
+| 2 MHz     | 500 ns | 4 µs   | 85         | 680         |
+| 1 MHz     | 1 µs   | 8 µs   | 170        | 1360        |
 
 An IRQ handler (12-cycle entry + read DR + decode + write DR ≈ 50–90
 cycles, code in RAM, priority 0) meets an ~85-cycle deadline marginally
@@ -124,12 +124,12 @@ SPI you can't pre-arm, because you don't know which device is next.
 
 Rank the devices by how much they need this:
 
-| device       | dummy byte | deadline-2 slack | rate / bandwidth | verdict |
-|--------------|-----------|------------------|------------------|---------|
-| BMI088 gyro  | **no**    | ~1 bit           | 2 kHz, dominant  | dedicated SPI, prediction-capable |
-| BMI088 accel | yes       | ~1 byte          | 1.6 kHz, high    | dedicated SPI, prediction-capable |
-| BMP390       | yes       | ~1 byte          | 50 Hz, trivial   | shared SPI, IRQ engine forever |
-| RM3100       | **no**    | ~1 bit           | ≤1 MHz mandatory | shared SPI, IRQ engine forever |
+| device       | dummy byte | deadline-2 slack | rate / bandwidth | verdict                           |
+| ------------ | ---------- | ---------------- | ---------------- | --------------------------------- |
+| BMI088 gyro  | **no**     | ~1 bit           | 2 kHz, dominant  | dedicated SPI, prediction-capable |
+| BMI088 accel | yes        | ~1 byte          | 1.6 kHz, high    | dedicated SPI, prediction-capable |
+| BMP390       | yes        | ~1 byte          | 50 Hz, trivial   | shared SPI, IRQ engine forever    |
+| RM3100       | **no**     | ~1 bit           | ≤1 MHz mandatory | shared SPI, IRQ engine forever    |
 
 Hence the hybrid: **SPI1 = gyro, SPI2 = accel** (hardware NSS, own DMA
 pair each), **SPI3 = baro + mag shared** (SSM permanently selected, two
@@ -152,26 +152,26 @@ and M3 measures it before anything depends on it.
 
 ## Pinout (draft — run `narray -part STM32G474RET6 -pinfmt` on the real board.c)
 
-| Signal        | Pin  | Function        | Notes                        |
-|---------------|------|-----------------|------------------------------|
-| BUS SCK       | PC10 | SPI3_SCK AF6    | one shared slave, SSM (v3)   |
-| BUS MISO      | PC11 | SPI3_MISO AF6   |                              |
-| BUS MOSI      | PC12 | SPI3_MOSI AF6   |                              |
-| CS baro       | PC0  | GPIO in, EXTI0  | all four CS on one port: the |
-| CS mag        | PC1  | GPIO in, EXTI1  | CS handler demuxes with a    |
-| CS gyro       | PC2  | GPIO in, EXTI2  | single IDR read (engine      |
-| CS accel      | PC3  | GPIO in, EXTI3  | contract), 4 dedicated vecs  |
-| (reserved)    | PA4–PA7   | analog    | v2 SPI1 slave: hybrid fallback|
-| (reserved)    | PB12–PB15 | analog    | v2 SPI2 slave: hybrid fallback|
-| DRDY accel    | PC4  | GPIO out        | BMI088 INT1                  |
-| DRDY gyro     | PC5  | GPIO out        | BMI088 INT3                  |
-| DRDY baro     | PB6  | GPIO out        | BMP390 INT                   |
-| DRDY mag      | PB7  | GPIO out        | RM3100 DRDY                  |
-| PWM in 1–4    | PA0 PA1 PB10 PB11 | TIM2_CH1–4 AF1 | 32-bit timer  |
-| PWM in 5–8    | PC6 PC7 PC8 PC9   | TIM3_CH1–4 AF2 |               |
-| CAN RX/TX     | PA11/PA12 | FDCAN1 AF9 | + external transceiver; NOT PB8/PB9 (see note) |
-| Console       | PA9/PA10 | USART1 AF7  | as examples/hello            |
-| LED           | PC13 | GPIO out        |                              |
+| Signal     | Pin               | Function       | Notes                                          |
+| ---------- | ----------------- | -------------- | ---------------------------------------------- |
+| BUS SCK    | PC10              | SPI3_SCK AF6   | one shared slave, SSM (v3)                     |
+| BUS MISO   | PC11              | SPI3_MISO AF6  |                                                |
+| BUS MOSI   | PC12              | SPI3_MOSI AF6  |                                                |
+| CS baro    | PC0               | GPIO in, EXTI0 | all four CS on one port: the                   |
+| CS mag     | PC1               | GPIO in, EXTI1 | CS handler demuxes with a                      |
+| CS gyro    | PC2               | GPIO in, EXTI2 | single IDR read (engine                        |
+| CS accel   | PC3               | GPIO in, EXTI3 | contract), 4 dedicated vecs                    |
+| (reserved) | PA4–PA7           | analog         | v2 SPI1 slave: hybrid fallback                 |
+| (reserved) | PB12–PB15         | analog         | v2 SPI2 slave: hybrid fallback                 |
+| DRDY accel | PC4               | GPIO out       | BMI088 INT1                                    |
+| DRDY gyro  | PC5               | GPIO out       | BMI088 INT3                                    |
+| DRDY baro  | PB6               | GPIO out       | BMP390 INT                                     |
+| DRDY mag   | PB7               | GPIO out       | RM3100 DRDY                                    |
+| PWM in 1–4 | PA0 PA1 PB10 PB11 | TIM2_CH1–4 AF1 | 32-bit timer                                   |
+| PWM in 5–8 | PC6 PC7 PC8 PC9   | TIM3_CH1–4 AF2 |                                                |
+| CAN RX/TX  | PA11/PA12         | FDCAN1 AF9     | + external transceiver; NOT PB8/PB9 (see note) |
+| Console    | PA9/PA10          | USART1 AF7     | as examples/hello                              |
+| LED        | PC13              | GPIO out       |                                                |
 
 **Why not PB8/PB9 for CAN:** PB8 is BOOT0 on the G4. A CAN transceiver's
 RXD idles high (recessive), so a transceiver on PB8 pulls BOOT0 high
@@ -381,14 +381,14 @@ big-endian (`lib/binary.h`). The harness owns the 0x40 MSGID block in
 both channels; 0x01–0x3f (measurements) and 0x00–0x03, 0x70+ (TMC)
 stay with the existing device dictionary. Scaled ints, 8-byte frames:
 
-| LCC/MSGID | dir | payload |
-|-----------|-----|---------|
-| TMC 0x40  | →harness | CMD_STATE: V cm/s i16, ḣ cm/s i16, ψ̇ mrad/s i16, flags u16 |
-| TMC 0x41  | →harness | CMD_ENV: QNH Pa/10 u16, T₀ 0.1 K u16, mag B 0.01 µT u16, incl 0.01° i16 |
-| TMC 0x42  | →harness | CMD_NOISE: per-sensor enable mask + levels |
-| MEAS 0x40/0x41 | harness→ | PWM ch1–4 / ch5–8: 4 × u16 µs, 50 Hz + on change (> 2 µs) |
-| MEAS 0x42 | harness→ | STATUS 10 Hz: harness time µs u32 (truncated), ψ 0.01° u16, flags u16 |
-| MEAS 0x43 | harness→ | DIAG: per-device transaction / unexpected-access / prediction-miss counters |
+| LCC/MSGID      | dir      | payload                                                                     |
+| -------------- | -------- | --------------------------------------------------------------------------- |
+| TMC 0x40       | →harness | CMD_STATE: V cm/s i16, ḣ cm/s i16, ψ̇ mrad/s i16, flags u16                  |
+| TMC 0x41       | →harness | CMD_ENV: QNH Pa/10 u16, T₀ 0.1 K u16, mag B 0.01 µT u16, incl 0.01° i16     |
+| TMC 0x42       | →harness | CMD_NOISE: per-sensor enable mask + levels                                  |
+| MEAS 0x40/0x41 | harness→ | PWM ch1–4 / ch5–8: 4 × u16 µs, 50 Hz + on change (> 2 µs)                   |
+| MEAS 0x42      | harness→ | STATUS 10 Hz: harness time µs u32 (truncated), ψ 0.01° u16, flags u16       |
+| MEAS 0x43      | harness→ | DIAG: per-device transaction / unexpected-access / prediction-miss counters |
 
 Stale-command watchdog: no CMD_STATE for 1 s → hold last state, flag in
 STATUS. The same commanded state is what a host-side DroneCAN

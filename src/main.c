@@ -480,6 +480,7 @@ void Reset_Handler(void) {
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
 			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)cmd_state.seq);
+			tprintf("scrubfail %u qcmd %x ", (unsigned)sensor_bus.scrubfail, sensor_bus.qcmd_seen);
 #ifdef TRANSPORT_CAN
 			tprintf("can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
 			        (unsigned)can1.status.tx_count, (unsigned)can1.status.rx_count[0],

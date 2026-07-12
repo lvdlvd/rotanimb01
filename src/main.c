@@ -189,24 +189,24 @@ static void sample_gyro(uint32_t now) {
 	gyro_commit(xyz, now);
 }
 
-static void sample_accel(void) {
+static void sample_accel(uint32_t now) {
 	const struct PhysicsTruth *t = physics_truth();
 	float lsb = 32767.0f / (accel_fullscale_g() * PHYSICS_G); // counts per m/s^2
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
 		xyz[i] = sat16(t->sforce[i] * lsb);
 	}
-	accel_commit(xyz, t->t_degc);
+	accel_commit(xyz, t->t_degc, now);
 }
 
-static void sample_mag(void) {
+static void sample_mag(uint32_t now) {
 	const struct PhysicsTruth *t = physics_truth();
 	float lsb = mag_lsb_per_ut();
 	int32_t xyz[3];
 	for (int i = 0; i < 3; i++) {
 		xyz[i] = (int32_t)(t->mag[i] * lsb);
 	}
-	mag_commit(xyz);
+	mag_commit(xyz, now);
 }
 
 // ---- host command decode (big-endian, canmsg.h dictionary) -------------------
@@ -389,16 +389,16 @@ void Reset_Handler(void) {
 				}
 				if ((hz = accel_rate_hz()) != 0 && (acc_a += hz) >= 10000) {
 					acc_a -= 10000;
-					sample_accel();
+					sample_accel(now);
 				}
 				if ((hz = baro_rate_hz()) != 0 && (acc_b += hz) >= 10000) {
 					acc_b -= 10000;
 					const struct PhysicsTruth *t = physics_truth();
-					baro_commit(t->t_degc, t->p_pa);
+					baro_commit(t->t_degc, t->p_pa, now);
 				}
 				if ((hz = mag_rate_hz()) != 0 && (acc_m += hz) >= 10000) {
 					acc_m -= 10000;
-					sample_mag();
+					sample_mag(now);
 				}
 			}
 		}
@@ -472,14 +472,14 @@ void Reset_Handler(void) {
 			const struct PhysicsTruth *pt = physics_truth();
 			uint32_t pc = phys_cycles_max;
 			phys_cycles_max = 0;
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u cmd seq %u ",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u ",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
 			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
 			        (unsigned)pt->p_pa, (unsigned)pc,
 			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
-			        (unsigned)sensor_bus.stray, (unsigned)cmd_state.seq);
+			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)cmd_state.seq);
 #ifdef TRANSPORT_CAN
 			tprintf("can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
 			        (unsigned)can1.status.tx_count, (unsigned)can1.status.rx_count[0],
@@ -491,6 +491,15 @@ void Reset_Handler(void) {
 			tprintf("usb %s bad %u drop %u\n", usb_state_str(usb_state()),
 			        (unsigned)usb_bad, (unsigned)usb_drop);
 #endif
+			char tb[16];
+			if (sensors_trace_next(tb)) {
+				tprintf("trc:");
+				int budget = 40; // bounded so the console DMA fifo can't overrun
+				do {
+					tprintf("%s", tb);
+				} while (--budget && sensors_trace_next(tb));
+				tprintf("\n");
+			}
 		}
 	}
 }

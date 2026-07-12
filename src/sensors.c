@@ -61,8 +61,8 @@ static const uint8_t mag_wmask[SPIDEV_REGS / 8] = {
 // ---- deferred work flags (set in frame hooks, handled by sensors_poll) -----
 
 static volatile bool accel_reset_req, gyro_reset_req, baro_reset_req;
-static uint32_t gyro_drdy_set_us;
-static volatile bool gyro_drdy_armed;
+static uint32_t gyro_drdy_set_us, accel_drdy_set_us, baro_drdy_set_us, mag_drdy_set_us;
+static volatile bool gyro_drdy_armed, accel_drdy_armed, baro_drdy_armed, mag_drdy_armed;
 static volatile bool mag_poll_pending; // single-shot POLL awaiting a sample
 
 // ---- the BMI088 FIFOs (M4b, spec = the ArduPilot driver) --------------------
@@ -103,11 +103,50 @@ static void fifo_pop(uint8_t *fifo, uint16_t *fill, int len, int framesz) {
 // ---- frame hooks: clear-on-read, DRDY release, write side effects ----------
 // Run at deselect (priority 0): register flips and flags only.
 
+// bring-up frame trace: every hook pushes what the engine decoded; the
+// heartbeat drains it via sensors_trace_next. Overrun drops the oldest.
+static struct FrameTrace {
+	uint8_t dev, cmd, addr, len;
+} ftrace[128];
+static volatile uint32_t ftrace_head;
+static uint32_t ftrace_tail;
+
+static void trace_frame(uint8_t dev, uint8_t cmd, uint8_t addr, int len) {
+	ftrace[ftrace_head % 128] = (struct FrameTrace){dev, cmd, addr, (uint8_t)len};
+	ftrace_head++;
+}
+
+int sensors_trace_next(char buf[static 16]) {
+	uint32_t head = ftrace_head;
+	if (ftrace_tail == head) {
+		return 0;
+	}
+	if (head - ftrace_tail > 128) {
+		ftrace_tail = head - 128; // overrun: skip to the oldest survivor
+	}
+	struct FrameTrace e = ftrace[ftrace_tail % 128];
+	ftrace_tail++;
+	static const char hex[] = "0123456789abcdef";
+	buf[0] = ' ';
+	buf[1] = (char)e.dev;
+	buf[2] = hex[e.cmd >> 4];
+	buf[3] = hex[e.cmd & 15];
+	buf[4] = '@';
+	buf[5] = hex[e.addr >> 4];
+	buf[6] = hex[e.addr & 15];
+	buf[7] = '+';
+	buf[8] = hex[e.len >> 4];
+	buf[9] = hex[e.len & 15];
+	buf[10] = 0;
+	return 10;
+}
+
 static bool frame_reads(uint8_t cmd, uint8_t addr, int len, uint8_t lo, uint8_t hi) {
 	return (cmd & 0x80) && addr <= hi && addr + len > lo;
 }
 
 static void accel_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
+	trace_frame('a', cmd, addr, len);
 	if (cmd & 0x80) {
 		if (frame_reads(cmd, addr, len, A_DATA, A_DATA + 5)) {
 			d->reg[A_STATUS] &= ~0x80; // drdy_acc: reset on data read
@@ -136,6 +175,7 @@ static void accel_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
 }
 
 static void gyro_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
+	trace_frame('g', cmd, addr, len);
 	if (cmd & 0x80) {
 		if (addr == G_FIFO_DATA) { // FIFO drain (the engine's streaming register)
 			fifo_pop(gyro_fifo, &gyro_fifo_fill, len, 6);
@@ -156,6 +196,7 @@ static void gyro_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
 }
 
 static void baro_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
+	trace_frame('b', cmd, addr, len);
 	if (cmd & 0x80) {
 		if (frame_reads(cmd, addr, len, B_PRESS, B_PRESS + 2)) {
 			d->reg[B_STATUS] &= ~0x20; // drdy_press
@@ -183,6 +224,7 @@ static void baro_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
 }
 
 static void mag_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
+	trace_frame('m', cmd, addr, len);
 	uint8_t hshake = d->reg[M_HSHAKE];
 	if (cmd & 0x80) {
 		// DRC1: DRDY cleared by reading the measurement results
@@ -320,6 +362,28 @@ void sensors_poll(uint32_t now_us) {
 			(gyro_dev.reg[G_IO_CONF] & 0x01) ? digitalLo(DRDY_GYRO) : digitalHi(DRDY_GYRO);
 		}
 	}
+	// The other DRDY pins auto-release too, mirroring the real parts'
+	// non-latched per-sample pulses. Without this a level that asserted
+	// before the DUT armed its EXTIs never produces an edge and never gets
+	// read — the pin must re-pulse on every commit. The latched status
+	// registers keep their clear-on-read semantics (frame hooks).
+	if (accel_drdy_armed && now_us - accel_drdy_set_us > 300) {
+		accel_drdy_armed = false;
+		accel_dev.reg[A_INT_STAT_1] = 0;
+		if (accel_dev.reg[A_INT_MAP_DATA] & 0x04) {
+			(accel_dev.reg[A_INT1_IO_CTRL] & 0x02) ? digitalLo(DRDY_ACC) : digitalHi(DRDY_ACC);
+		}
+	}
+	if (baro_drdy_armed && now_us - baro_drdy_set_us > 300) {
+		baro_drdy_armed = false;
+		if (baro_dev.reg[B_INT_CTRL] & 0x40) {
+			(baro_dev.reg[B_INT_CTRL] & 0x02) ? digitalLo(DRDY_BARO) : digitalHi(DRDY_BARO);
+		}
+	}
+	if (mag_drdy_armed && now_us - mag_drdy_set_us > 300) {
+		mag_drdy_armed = false;
+		digitalLo(DRDY_MAG); // active high; M_STATUS stays until the HSHAKE clear
+	}
 }
 
 // ---- rates and scales from the live registers --------------------------------
@@ -372,11 +436,17 @@ uint32_t mag_rate_hz(void) {
 	if (!(mag_dev.reg[M_CMM] & 0x01)) {
 		return 0; // continuous mode not started
 	}
-	uint8_t tmrc = mag_dev.reg[M_TMRC];
-	if (tmrc < 0x92 || tmrc > 0x9D) {
-		return 37;
+	// TMRC only caps the rate; the cycle counts set the actual measurement
+	// duration over the three axes: ~30000/CC Hz (CC=200 -> ~150 Hz,
+	// CC=150 -> ~200 Hz, matching the real part on the bench)
+	uint32_t cc = ((uint32_t)mag_dev.reg[M_CC] << 8) | mag_dev.reg[M_CC + 1];
+	if (cc == 0) {
+		cc = 200; // reset default
 	}
-	return 600u >> (tmrc - 0x92); // ~600 Hz at 0x92, halving per step
+	uint32_t meas = 30000 / cc;
+	uint8_t tmrc = mag_dev.reg[M_TMRC];
+	uint32_t cap = (tmrc < 0x92 || tmrc > 0x9D) ? 37 : (600u >> (tmrc - 0x92));
+	return meas < cap ? meas : cap;
 }
 
 float gyro_fullscale_dps(void) {
@@ -458,7 +528,7 @@ static void accel_apply(struct SPIDev *d, void *ctx) {
 	}
 }
 
-bool accel_commit(const int16_t xyz[3], float t_degc) {
+bool accel_commit(const int16_t xyz[3], float t_degc, uint32_t now_us) {
 	if (accel_rate_hz() == 0) {
 		return false;
 	}
@@ -491,11 +561,13 @@ bool accel_commit(const int16_t xyz[3], float t_degc) {
 	if (accel_dev.reg[A_INT_MAP_DATA] & 0x04 && (accel_dev.reg[A_INT1_IO_CTRL] & 0x08)) {
 		// drdy mapped to INT1 and INT1 output enabled, per configured polarity
 		(accel_dev.reg[A_INT1_IO_CTRL] & 0x02) ? digitalHi(DRDY_ACC) : digitalLo(DRDY_ACC);
+		accel_drdy_set_us = now_us;
+		accel_drdy_armed = true;
 	}
 	return true;
 }
 
-bool baro_commit(float t_degc, double p_pa) {
+bool baro_commit(float t_degc, double p_pa, uint32_t now_us) {
 	if (baro_rate_hz() == 0) {
 		return false;
 	}
@@ -514,11 +586,13 @@ bool baro_commit(float t_degc, double p_pa) {
 	if (baro_dev.reg[B_INT_CTRL] & 0x40) { // drdy_en
 		baro_dev.reg[B_INT_STATUS] |= 0x08;
 		(baro_dev.reg[B_INT_CTRL] & 0x02) ? digitalHi(DRDY_BARO) : digitalLo(DRDY_BARO);
+		baro_drdy_set_us = now_us;
+		baro_drdy_armed = true;
 	}
 	return true;
 }
 
-bool mag_commit(const int32_t xyz[3]) {
+bool mag_commit(const int32_t xyz[3], uint32_t now_us) {
 	bool single = mag_poll_pending;
 	if (!single && !(mag_dev.reg[M_CMM] & 0x01)) {
 		return false;
@@ -533,5 +607,7 @@ bool mag_commit(const int32_t xyz[3]) {
 	mag_poll_pending = false;
 	mag_dev.reg[M_STATUS] = 0x80;
 	digitalHi(DRDY_MAG); // RM3100 DRDY is active high
+	mag_drdy_set_us = now_us;
+	mag_drdy_armed = true;
 	return true;
 }

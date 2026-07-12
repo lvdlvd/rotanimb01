@@ -30,6 +30,11 @@ extern const struct BMP390Trim baro_trim; // the trim served as the baro's NVM
 // routes DMAMUX and EXTI, and owns the vectors.
 void sensors_init(void);
 
+// bring-up frame trace: formats the next undrained frame as
+// " <dev><cmd>@<addr>+<len>" (e.g. " a80@00+02") into buf and returns its
+// length, 0 when drained. Thread level only.
+int sensors_trace_next(char buf[static 16]);
+
 // thread-level upkeep: deferred soft resets, gyro drdy auto-clear (~300 µs)
 void sensors_poll(uint32_t now_us);
 
@@ -49,6 +54,6 @@ float mag_lsb_per_ut(void);      // 0.3671 * CC + 1.5, from the live CC regs
 // commit one sample (already quantized to device LSBs). Returns false if
 // the device was selected (retry next tick) or not sampling.
 bool gyro_commit(const int16_t xyz[3], uint32_t now_us);
-bool accel_commit(const int16_t xyz[3], float t_degc);
-bool baro_commit(float t_degc, double p_pa); // raw words via bmp390inv
-bool mag_commit(const int32_t xyz[3]);       // 24-bit signed per axis
+bool accel_commit(const int16_t xyz[3], float t_degc, uint32_t now_us);
+bool baro_commit(float t_degc, double p_pa, uint32_t now_us); // raw words via bmp390inv
+bool mag_commit(const int32_t xyz[3], uint32_t now_us);       // 24-bit signed per axis

@@ -10,3 +10,4 @@
 /src/pinmux.h
 /src/*.ld
 /bmp390inv/golden
+/rb01tool/rb01tool

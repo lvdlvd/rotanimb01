@@ -97,7 +97,7 @@ static uint32_t usb_bad, usb_drop; // malformed host lines; usb_tx overflows
 #endif
 
 static void can_send(uint32_t msgid, const uint8_t *payload, size_t len) {
-	static uint8_t seq[4]; // per-message ts_seq, CANMSG_PWM14..DIAG
+	static uint8_t seq[8]; // per-message ts_seq, CANMSG_PWM14..TRUTH_CTRL
 	uint32_t id29 = canmsg_id29(CANMSG_LCC_MEAS, msgid, 0, srcid, seq[msgid - CANMSG_PWM14]++);
 #ifdef TRANSPORT_CAN
 	fdcan_tx(&can1, (uint8_t)msgid, can_header_from29(id29), len, payload); // tag = msgid
@@ -391,7 +391,7 @@ void Reset_Handler(void) {
 		uint32_t change_us; // last time count advanced
 	} chan[8] = {0};
 
-	uint32_t t_pwm = now_us(), t_status = t_pwm, t_diag = t_pwm, t_tick = t_pwm;
+	uint32_t t_pwm = now_us(), t_status = t_pwm, t_diag = t_pwm, t_tick = t_pwm, t_truth = t_pwm;
 	for (;;) {
 		// console RX echo (link sanity, M0 heritage)
 		uint8_t chunk[64];
@@ -514,6 +514,39 @@ void Reset_Handler(void) {
 			for (int i = 0; i < 8; i++) {
 				chan[i].sent_w = w[i];
 			}
+		}
+
+		if (fdm_mode && (int32_t)(now - t_truth) >= 50000) { // TRUTH_* 20 Hz
+			t_truth = now;
+			const struct FdmTruth *ft = &fdm.truth;
+			uint8_t p[8];
+
+			encode_be_uint32(p, (uint32_t)(int32_t)(ft->h * 100.0f));
+			encode_be_uint16(p + 4, (uint16_t)sat16(-ft->v_ned[2] * 100.0f));
+			encode_be_uint16(p + 6,
+			                 (uint16_t)sat16(sqrtf(ft->v_ned[0] * ft->v_ned[0] +
+			                                       ft->v_ned[1] * ft->v_ned[1]) * 100.0f));
+			can_send(CANMSG_TRUTH_POSVEL, p, 8);
+
+			for (int i = 0; i < 4; i++) {
+				encode_be_uint16(p + 2 * i, (uint16_t)sat16(ft->quat[i] * 32767.0f));
+			}
+			can_send(CANMSG_TRUTH_ATT, p, 8);
+
+			float ias = sqrtf(2.0f * ft->qbar / 1.225f); // sea-level-density IAS
+			const float r2cd = 18000.0f / (float)M_PI;
+			encode_be_uint16(p, (uint16_t)sat16(ias * 10.0f));
+			encode_be_uint16(p + 2, (uint16_t)sat16(ft->va * 10.0f));
+			encode_be_uint16(p + 4, (uint16_t)sat16(ft->alpha * r2cd));
+			encode_be_uint16(p + 6, (uint16_t)sat16(ft->beta * r2cd));
+			can_send(CANMSG_TRUTH_AIR, p, 8);
+
+			const struct FdmControls *cc = controls_state();
+			encode_be_uint16(p, (uint16_t)sat16(cc->da * r2cd));
+			encode_be_uint16(p + 2, (uint16_t)sat16(cc->de * r2cd));
+			encode_be_uint16(p + 4, (uint16_t)sat16(cc->dr * r2cd));
+			encode_be_uint16(p + 6, (uint16_t)(cc->dt * 1000.0f));
+			can_send(CANMSG_TRUTH_CTRL, p, 8);
 		}
 
 		if ((int32_t)(now - t_status) >= 100000) { // STATUS 10 Hz

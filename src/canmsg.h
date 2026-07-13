@@ -35,6 +35,10 @@
 //                     0x41 PWM58      idem ch 5-8
 //                     0x42 STATUS     u32 time us, u16 psi 0.01deg, u16 flags (bit0: cmd stale), 10 Hz
 //                     0x43 DIAG       u16 can tx, u16 can rx, u16 rx ovfl, u16 pwm errs, 1 Hz
+//                     0x44 TRUTH_POSVEL i32 h cm, i16 hdot cm/s, i16 groundspeed cm/s, 20 Hz (fdm mode)
+//                     0x45 TRUTH_ATT    q_nb w x y z as i16 x 2^15, 20 Hz (fdm mode)
+//                     0x46 TRUTH_AIR    u16 IAS 0.1 m/s, u16 TAS 0.1 m/s, i16 alpha 0.01 deg, i16 beta, 20 Hz
+//                     0x47 TRUTH_CTRL   i16 da/de/dr 0.01 deg post-lag, u16 throttle 0.1 %, 20 Hz
 
 #include "device.h"
 
@@ -55,6 +59,10 @@ enum {
 	CANMSG_PWM58 = 0x41,
 	CANMSG_STATUS = 0x42,
 	CANMSG_DIAG = 0x43,
+	CANMSG_TRUTH_POSVEL = 0x44,
+	CANMSG_TRUTH_ATT = 0x45,
+	CANMSG_TRUTH_AIR = 0x46,
+	CANMSG_TRUTH_CTRL = 0x47,
 };
 
 // compose a 29-bit id (LCL=0, PRV=1, reserved=0b1001 fixed)

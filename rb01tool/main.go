@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -160,6 +161,8 @@ const (
 	cmdENV     = 0x41 // TMC: u16 QNH Pa/10, u16 T0 0.1K, u16 B 0.01uT, i16 incl 0.01deg
 	cmdFDMMODE = 0x43 // TMC: u8 mode (0 kinematic / 1 six-dof), u8 flags
 	cmdFDMINIT = 0x44 // TMC: u16 alt m, u16 IAS 0.1 m/s, u16 heading 0.01 deg -> trim & reset
+	cmdWIND    = 0x46 // TMC: i16 N/E/D cm/s, u8 gust sigma cm/s, u8 gust tau s
+	cmdPARAM   = 0x47 // TMC: u16 index (|0x8000 = read), f32 value
 
 	measPWM14  = 0x40 // 4 x u16 us
 	measPWM58  = 0x41
@@ -169,6 +172,9 @@ const (
 	measATT    = 0x45 // q_nb w x y z, i16 x 2^15
 	measAIR    = 0x46 // u16 IAS 0.1 m/s, u16 TAS, i16 alpha 0.01 deg, i16 beta
 	measCTRL   = 0x47 // i16 da/de/dr 0.01 deg, u16 throttle 0.1 %
+	measPARAM  = 0x48 // u16 index, f32 value: PARAM_SET readback
+	measPOS    = 0x49 // i32 N cm, i32 E cm from origin
+	measVEL    = 0x4A // i16 vN/vE/vD cm/s
 )
 
 func id29(lcc, msgid, srcid, seq uint32) uint32 {
@@ -212,9 +218,17 @@ type state struct {
 		psi float64
 		flg uint16
 	}
-	pwm  [8]uint16
-	diag [4]uint16
-	fl   flight // TRUTH_* telemetry, fdm mode
+	pwm       [8]uint16
+	diag      [4]uint16
+	fl        flight // TRUTH_* telemetry, fdm mode
+	paramIdx  uint16 // last PARAM_VAL readback
+	paramVal  float32
+	paramSeen bool
+
+	posN, posE       float64 // m from origin (TRUTH_POS)
+	vN, vE, vD       float64 // m/s (TRUTH_VEL)
+	snaps            []snap  // timestamped history for the GPS lag
+	feedFix, feedAir uint64  // feeder transfer counters
 
 	byID map[uint32]*counter // per 29-bit-id (seq masked) traffic summary
 }
@@ -225,6 +239,8 @@ type commands struct {
 	v, hdot, psidot    float64 // m/s, m/s, deg/s
 	qnh, t0, b, incl   float64 // Pa, K, uT, deg
 	fdmMode            bool    // six-dof truth source commanded
+	windE              float64 // steady crosswind from the west (east component), m/s
+	gusts              bool    // Gauss-Markov gusts on (sigma 1.5 m/s, tau 3 s)
 	pfdView            bool    // 'f': the ascii-art PFD instead of the panel
 	initAlt, initIAS   float64 // air-start point, m and m/s
 	sentState, sentEnv uint64
@@ -241,6 +257,16 @@ func (c *commands) fdmModePayload() []byte {
 	p := make([]byte, 8) // full frames: the harness rejects len < 8 as truncated
 	if c.fdmMode {
 		p[0] = 1
+	}
+	return p
+}
+
+func (c *commands) windPayload() []byte {
+	p := make([]byte, 8)
+	binary.BigEndian.PutUint16(p[2:], uint16(int16(c.windE*100))) // east, cm/s
+	if c.gusts {
+		p[6] = 150 // sigma 1.5 m/s
+		p[7] = 3   // tau 3 s
 	}
 	return p
 }
@@ -308,8 +334,74 @@ func findPort(flagged string) (string, error) {
 	return "", fmt.Errorf("multiple candidates, pass -p:\n  %s", strings.Join(m, "\n  "))
 }
 
+type snap struct {
+	t               time.Time
+	n, e, alt       float64
+	vN, vE, vD, ias float64
+}
+
+// feeder: republish the (lagged) truth as DroneCAN GNSS Fix2 + RawAirData at
+// 5 Hz onto a second pseudocan port (the canusb bridge to the DUT's bus).
+// The configurable lag matters: a zero-latency GPS would make HITL kinder
+// than reality (fdm-DESIGN.md F4).
+func feeder(dev *os.File, st *state, lagMS int, lat0, lon0 float64) {
+	const mPerDegLat = 111319.4908
+	var tidFix, tidAir uint8
+	send := func(frames []canFrame) {
+		for _, f := range frames {
+			h := mkHeader29(f.id)
+			fmt.Fprintf(dev, "%v:%s:%04x 1 0\n", h, hex.EncodeToString(f.data), checksum(h, f.data))
+		}
+	}
+	for range time.Tick(200 * time.Millisecond) {
+		st.Lock()
+		var v snap
+		found := false
+		cut := time.Now().Add(-time.Duration(lagMS) * time.Millisecond)
+		for i := len(st.snaps) - 1; i >= 0; i-- {
+			if st.snaps[i].t.Before(cut) {
+				v = st.snaps[i]
+				found = true
+				break
+			}
+		}
+		if found {
+			st.feedFix++
+			st.feedAir++
+		}
+		st.Unlock()
+		if !found {
+			continue
+		}
+
+		lat := lat0 + v.n/mPerDegLat
+		lon := lon0 + v.e/(mPerDegLat*math.Cos(lat0*math.Pi/180))
+		fix := &fix2{
+			usec:        uint64(time.Since(feedEpoch) / time.Microsecond),
+			latDeg1e8:   int64(lat * 1e8),
+			lonDeg1e8:   int64(lon * 1e8),
+			heightEllMM: int32(v.alt * 1000),
+			heightMSLMM: int32(v.alt * 1000),
+			nedVel:      [3]float32{float32(v.vN), float32(v.vE), float32(v.vD)},
+			satsUsed:    12,
+			status:      3,
+			covariance:  []float32{1, 1, 1, 0.25, 0.25, 0.25},
+			pdop:        1.5,
+		}
+		send(broadcast(fix2ID, fix2Signature, prioMedium, feederNode, &tidFix, encodeFix2(fix)))
+		air := &rawAir{diffPa: float32(0.5 * 1.225 * v.ias * v.ias), airTempK: 288.15}
+		send(broadcast(rawAirID, rawAirSig, prioMedium, feederNode, &tidAir, encodeRawAir(air)))
+	}
+}
+
+var feedEpoch = time.Now()
+
 func main() {
 	fPort := flag.String("p", "", "serial port (default: the single /dev/cu.usbmodem*)")
+	fGPS := flag.String("gps", "", "second pseudocan port for the DroneCAN GPS/airspeed feeder (canusb bridge)")
+	fLag := flag.Int("gpslag", 150, "GPS feeder latency, ms")
+	fLat := flag.Float64("lat0", 52.0, "feeder origin latitude, deg")
+	fLon := flag.Float64("lon0", 5.1, "feeder origin longitude, deg")
 	flag.Parse()
 
 	port, err := findPort(*fPort)
@@ -341,6 +433,19 @@ func main() {
 	st := &state{byID: map[uint32]*counter{}}
 	cmd := defaultCommands()
 	var cmdMu sync.Mutex
+
+	if *fGPS != "" {
+		gdev, err := os.OpenFile(*fGPS, os.O_RDWR, 0)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defer gdev.Close()
+		if r, err := term.MakeRaw(int(gdev.Fd())); err == nil {
+			defer term.Restore(int(gdev.Fd()), r)
+		}
+		go feeder(gdev, st, *fLag, *fLat, *fLon)
+	}
 
 	// reader: harness lines -> state
 	go func() {
@@ -406,6 +511,23 @@ func main() {
 					st.fl.de = float64(int16(binary.BigEndian.Uint16(p[2:]))) / 100
 					st.fl.dr = float64(int16(binary.BigEndian.Uint16(p[4:]))) / 100
 					st.fl.dt = float64(binary.BigEndian.Uint16(p[6:])) / 1000
+				case m == measPARAM && len(p) == 8:
+					st.paramIdx = binary.BigEndian.Uint16(p)
+					st.paramVal = math.Float32frombits(binary.BigEndian.Uint32(p[2:]))
+					st.paramSeen = true
+				case m == measPOS && len(p) == 8:
+					st.posN = float64(int32(binary.BigEndian.Uint32(p))) / 100
+					st.posE = float64(int32(binary.BigEndian.Uint32(p[4:]))) / 100
+				case m == measVEL && len(p) == 8:
+					st.vN = float64(int16(binary.BigEndian.Uint16(p))) / 100
+					st.vE = float64(int16(binary.BigEndian.Uint16(p[2:]))) / 100
+					st.vD = float64(int16(binary.BigEndian.Uint16(p[4:]))) / 100
+					// VEL closes each 20 Hz truth burst: snapshot for the GPS lag
+					st.snaps = append(st.snaps, snap{now, st.posN, st.posE,
+						st.fl.alt, st.vN, st.vE, st.vD, st.fl.ias})
+					if len(st.snaps) > 40 {
+						st.snaps = st.snaps[len(st.snaps)-40:]
+					}
 				}
 			}
 			st.Unlock()
@@ -454,6 +576,15 @@ func main() {
 				cmd.qnh, cmd.t0, cmd.b, cmd.incl = env.qnh, env.t0, env.b, env.incl
 			case 'f', 'F':
 				cmd.pfdView = !cmd.pfdView
+			case 'w':
+				cmd.windE -= 1
+				cmd.oneshot = append(cmd.oneshot, oneshotMsg{cmdWIND, cmd.windPayload()})
+			case 'W':
+				cmd.windE += 1
+				cmd.oneshot = append(cmd.oneshot, oneshotMsg{cmdWIND, cmd.windPayload()})
+			case 'g', 'G':
+				cmd.gusts = !cmd.gusts
+				cmd.oneshot = append(cmd.oneshot, oneshotMsg{cmdWIND, cmd.windPayload()})
 			case 'm', 'M':
 				cmd.fdmMode = !cmd.fdmMode
 				cmd.oneshot = append(cmd.oneshot, oneshotMsg{cmdFDMMODE, cmd.fdmModePayload()})
@@ -561,8 +692,21 @@ func repaint(port string, st *state, cmd *commands, cmdMu *sync.Mutex) {
 	if cmd.fdmMode {
 		mode = "1 six-dof"
 	}
+	gust := "off"
+	if cmd.gusts {
+		gust = "1.5 m/s τ3s"
+	}
+	pv := ""
+	if st.paramSeen {
+		pv = fmt.Sprintf("   P[%d]=%g", st.paramIdx, st.paramVal)
+	}
 	line("%sFDM%s     mode %s (commanded)   air-start: alt %.0f m  IAS %.0f m/s  hdg 0°",
 		bold, normal, mode, cmd.initAlt, cmd.initIAS)
+	line("%sWIND%s    east %+.0f m/s   gusts %s%s", bold, normal, cmd.windE, gust, pv)
+	if st.feedFix > 0 {
+		line("%sFEED%s    Fix2+RawAir sent %d   N %+.0f E %+.0f m   v %.1f/%.1f/%.1f",
+			bold, normal, st.feedFix, st.posN, st.posE, st.vN, st.vE, st.vD)
+	}
 	line("")
 
 	ids := make([]uint32, 0, len(st.byID))
@@ -577,7 +721,7 @@ func repaint(port string, st *state, cmd *commands, cmdMu *sync.Mutex) {
 			id>>18&0x7ff, id&0x3ffff, lccOf(id), msgidOf(id), srcidOf(id), c.n, c.rate())
 	}
 	line("")
-	line("%skeys%s  V/v speed  H/h climb  R/r turn  SPACE level  P/p qnh  T/t temp  e env-reset  i air-start  m fdm-mode  f pfd  q quit",
+	line("%skeys%s  V/v H/h R/r SPACE P/p T/t e — mode 0 | i air-start  m mode  W/w wind  g gusts  f pfd  q quit",
 		dim, normal)
 	b.WriteString(clrEOS)
 

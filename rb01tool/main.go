@@ -165,6 +165,10 @@ const (
 	measPWM58  = 0x41
 	measSTATUS = 0x42 // u32 time us, u16 psi 0.01deg, u16 flags (bit0 cmd stale)
 	measDIAG   = 0x43 // 4 x u16 (usb transport: 0, usb bad, usb drop, pwm errs)
+	measPOSVEL = 0x44 // i32 h cm, i16 hdot cm/s, i16 groundspeed cm/s
+	measATT    = 0x45 // q_nb w x y z, i16 x 2^15
+	measAIR    = 0x46 // u16 IAS 0.1 m/s, u16 TAS, i16 alpha 0.01 deg, i16 beta
+	measCTRL   = 0x47 // i16 da/de/dr 0.01 deg, u16 throttle 0.1 %
 )
 
 func id29(lcc, msgid, srcid, seq uint32) uint32 {
@@ -210,6 +214,7 @@ type state struct {
 	}
 	pwm  [8]uint16
 	diag [4]uint16
+	fl   flight // TRUTH_* telemetry, fdm mode
 
 	byID map[uint32]*counter // per 29-bit-id (seq masked) traffic summary
 }
@@ -220,6 +225,7 @@ type commands struct {
 	v, hdot, psidot    float64 // m/s, m/s, deg/s
 	qnh, t0, b, incl   float64 // Pa, K, uT, deg
 	fdmMode            bool    // six-dof truth source commanded
+	pfdView            bool    // 'f': the ascii-art PFD instead of the panel
 	initAlt, initIAS   float64 // air-start point, m and m/s
 	sentState, sentEnv uint64
 	seq                uint32
@@ -381,6 +387,25 @@ func main() {
 					for i := 0; i < 4; i++ {
 						st.diag[i] = binary.BigEndian.Uint16(p[2*i:])
 					}
+				case m == measPOSVEL && len(p) == 8:
+					st.fl.alt = float64(int32(binary.BigEndian.Uint32(p))) / 100
+					st.fl.hdot = float64(int16(binary.BigEndian.Uint16(p[4:]))) / 100
+					st.fl.gs = float64(int16(binary.BigEndian.Uint16(p[6:]))) / 100
+					st.fl.valid = true
+				case m == measATT && len(p) == 8:
+					q := [4]float64{}
+					for i := range q {
+						q[i] = float64(int16(binary.BigEndian.Uint16(p[2*i:]))) / 32767
+					}
+					st.fl.fromQuat(q[0], q[1], q[2], q[3])
+				case m == measAIR && len(p) == 8:
+					st.fl.ias = float64(binary.BigEndian.Uint16(p)) / 10
+					st.fl.tas = float64(binary.BigEndian.Uint16(p[2:])) / 10
+				case m == measCTRL && len(p) == 8:
+					st.fl.da = float64(int16(binary.BigEndian.Uint16(p))) / 100
+					st.fl.de = float64(int16(binary.BigEndian.Uint16(p[2:]))) / 100
+					st.fl.dr = float64(int16(binary.BigEndian.Uint16(p[4:]))) / 100
+					st.fl.dt = float64(binary.BigEndian.Uint16(p[6:])) / 1000
 				}
 			}
 			st.Unlock()
@@ -427,6 +452,8 @@ func main() {
 			case 'e', 'E':
 				env := defaultCommands()
 				cmd.qnh, cmd.t0, cmd.b, cmd.incl = env.qnh, env.t0, env.b, env.incl
+			case 'f', 'F':
+				cmd.pfdView = !cmd.pfdView
 			case 'm', 'M':
 				cmd.fdmMode = !cmd.fdmMode
 				cmd.oneshot = append(cmd.oneshot, oneshotMsg{cmdFDMMODE, cmd.fdmModePayload()})
@@ -487,6 +514,23 @@ func repaint(port string, st *state, cmd *commands, cmdMu *sync.Mutex) {
 	cmdMu.Lock()
 
 	b.WriteString(home)
+	if cmd.pfdView {
+		line("%srb01tool%s — PFD on %s ('f' back to the panel)", bold, normal, port)
+		if !st.fl.valid {
+			line("")
+			line("  no TRUTH telemetry yet — fdm mode off? press 'i' to air-start")
+		} else {
+			for _, l := range renderPFD(&st.fl) {
+				line("%s", l)
+			}
+		}
+		line("%skeys%s  V/v H/h R/r SPACE P/p T/t e i m f q — as on the panel", dim, normal)
+		b.WriteString(clrEOS)
+		cmdMu.Unlock()
+		st.Unlock()
+		os.Stdout.WriteString(b.String())
+		return
+	}
 	line("%srb01tool%s — rotanimb01 cockpit on %s", bold, normal, port)
 	age := "never"
 	if !st.lastRx.IsZero() {
@@ -533,7 +577,7 @@ func repaint(port string, st *state, cmd *commands, cmdMu *sync.Mutex) {
 			id>>18&0x7ff, id&0x3ffff, lccOf(id), msgidOf(id), srcidOf(id), c.n, c.rate())
 	}
 	line("")
-	line("%skeys%s  V/v speed  H/h climb  R/r turn  SPACE level  P/p qnh  T/t temp  e env-reset  i air-start  m fdm-mode  q quit",
+	line("%skeys%s  V/v speed  H/h climb  R/r turn  SPACE level  P/p qnh  T/t temp  e env-reset  i air-start  m fdm-mode  f pfd  q quit",
 		dim, normal)
 	b.WriteString(clrEOS)
 

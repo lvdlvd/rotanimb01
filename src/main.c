@@ -29,6 +29,7 @@
 #include "board.h"
 #include "canmsg.h"
 #include "controls.h"
+#include "dronecan.h"
 #include "clock.h"
 #include "exti.h"
 #include "console.h" // pulls serial.h + tprintf.h
@@ -72,7 +73,7 @@ struct CmdBox {
 	volatile uint32_t rx_us; // now_us() at reception
 };
 static struct CmdBox cmd_state, cmd_env, cmd_noise, cmd_fdm_mode, cmd_fdm_init, cmd_pwm_cal,
-		cmd_wind, cmd_param;
+		cmd_wind, cmd_param, cmd_gps_cfg;
 
 static void cmd_store(struct CmdBox *b, const uint8_t *p, size_t len) {
 	for (size_t i = 0; i < len && i < 8; i++) {
@@ -140,6 +141,9 @@ static void host_msg(uint32_t id29, const uint8_t *p, size_t len) {
 	case CANMSG_PARAM_SET:
 		cmd_store(&cmd_param, p, len);
 		break;
+	case CANMSG_GPS_CFG:
+		cmd_store(&cmd_gps_cfg, p, len);
+		break;
 	}
 }
 
@@ -176,6 +180,72 @@ static void fdm_publish_truth(void) {
 	fdm_pt.h = t->h;
 }
 
+// ---- the on-board DroneCAN GPS/airspeed feeder (fdm-DESIGN.md F4) -------------
+//
+// FDCAN3 (PB3/PB4) straight onto the DUT's CAN bus, no bridge board: Fix2 +
+// RawAirData at 5 Hz from the fdm truth held back by a configurable lag (a
+// zero-latency GPS would make HITL kinder than reality), NodeStatus at 1 Hz.
+// Node id 42. GPS_CFG (TMC 0x48) sets enable and lag at runtime.
+static struct FDCan can_gps = FDCAN_INITIALIZER(FDCAN3);
+static volatile uint32_t gps_busoff;
+
+struct GpsSnap {
+	uint32_t us; // 0 = empty slot
+	int32_t n_cm, e_cm, h_cm;
+	int16_t v_cms[3];
+	uint16_t ias_dms; // 0.1 m/s
+};
+static struct GpsSnap gps_ring[8];
+static uint32_t gps_head;
+static uint8_t gps_enable = 1, gps_lag_10ms = 15;
+static uint8_t gps_tid_fix, gps_tid_air, gps_tid_ns;
+
+// feeder origin: 52.0 N, 5.1 E. Integer microdegree math — float32 cannot
+// carry 1e-8 deg at these magnitudes. 1 cm north = 8.9831e-4 deg * 1e8 / 1e4;
+// east scaled by 1/cos(52 deg) = 1/0.61566.
+static const int64_t gps_lat0_1e8 = 5200000000LL, gps_lon0_1e8 = 510000000LL;
+static const int64_t gps_ncm_num = 89831, gps_ecm_num = 145910, gps_cm_den = 10000;
+
+static void gps_feed(uint32_t now) {
+	uint32_t lag_us = (uint32_t)gps_lag_10ms * 10000u;
+	const struct GpsSnap *snap = NULL;
+	for (uint32_t i = 0; i < 8; i++) {
+		const struct GpsSnap *c = &gps_ring[(gps_head - 1 - i) & 7];
+		if (c->us != 0 && now - c->us >= lag_us) {
+			snap = c;
+			break;
+		}
+	}
+	if (snap == NULL) {
+		return;
+	}
+	struct DroneCanFix2 fx = {
+		.usec = now,
+		.lat_deg_1e8 = gps_lat0_1e8 + (int64_t)snap->n_cm * gps_ncm_num / gps_cm_den,
+		.lon_deg_1e8 = gps_lon0_1e8 + (int64_t)snap->e_cm * gps_ecm_num / gps_cm_den,
+		.h_mm = snap->h_cm * 10,
+		.vned = {snap->v_cms[0] * 0.01f, snap->v_cms[1] * 0.01f, snap->v_cms[2] * 0.01f},
+		.sats = 12,
+		.status = 3,
+		.cov = {1, 1, 1, 0.25f, 0.25f, 0.25f},
+		.pdop = 1.5f,
+	};
+	uint8_t buf[64];
+	struct DroneCanFrame fr[16];
+	int n = dronecan_broadcast(DRONECAN_FIX2_ID, DRONECAN_FIX2_SIGNATURE, DRONECAN_PRIO_MEDIUM,
+	                           42, &gps_tid_fix, buf, dronecan_fix2(&fx, buf), fr, 16);
+	for (int i = 0; i < n; i++) {
+		fdcan_tx(&can_gps, 0, can_header_from29(fr[i].id29), fr[i].len, fr[i].data);
+	}
+	float ias = snap->ias_dms * 0.1f;
+	n = dronecan_broadcast(DRONECAN_RAWAIR_ID, DRONECAN_RAWAIR_SIGNATURE, DRONECAN_PRIO_MEDIUM,
+	                       42, &gps_tid_air, buf,
+	                       dronecan_rawair(0.5f * 1.225f * ias * ias, 0.0f, 288.15f, buf), fr, 16);
+	for (int i = 0; i < n; i++) {
+		fdcan_tx(&can_gps, 0, can_header_from29(fr[i].id29), fr[i].len, fr[i].data);
+	}
+}
+
 // IRQ priorities, 2:2 grouping: level[3:2] = preemption group, level[1:0] =
 // subpriority (orders pending IRQs only). Handlers in the SAME group can
 // never preempt each other — the spislave engine relies on that for SPI3 vs
@@ -198,6 +268,8 @@ static const struct {
 
 	{FDCAN1_IT0_IRQn, PRIO(1, 1)}, // TX events, bus-off
 	{FDCAN1_IT1_IRQn, PRIO(1, 1)}, // RX: command mailboxes
+	{FDCAN3_IT0_IRQn, PRIO(1, 1)}, // GPS feed: TX events, bus-off recovery
+	{FDCAN3_IT1_IRQn, PRIO(1, 1)}, // GPS feed: RX drain (DUT traffic, dropped)
 
 	{TIM7_DAC2_4_IRQn, PRIO(2, 1)}, // 10 kHz scheduler tick (counter only)
 
@@ -309,6 +381,11 @@ static void cmd_decode(void) {
 	if (cmd_snapshot(&cmd_pwm_cal, p, &seq_pcal)) {
 		controls_cal_msg(p);
 	}
+	static uint32_t seq_gps;
+	if (cmd_snapshot(&cmd_gps_cfg, p, &seq_gps)) {
+		gps_enable = p[0];
+		gps_lag_10ms = p[1];
+	}
 	static uint32_t seq_wind, seq_param;
 	if (cmd_snapshot(&cmd_wind, p, &seq_wind)) {
 		// i16 N/E/D cm/s, u8 gust sigma cm/s, u8 gust tau s
@@ -366,6 +443,12 @@ void Reset_Handler(void) {
 	nvic_enable(TIM3_IRQn);
 
 	srcid = canmsg_srcid_self();
+
+	// the on-board DroneCAN GPS feed rides FDCAN3 regardless of transport
+	fdcan_init(&can_gps, clock_fdcan_hz(), 1000000);
+	nvic_enable(FDCAN3_IT0_IRQn);
+	nvic_enable(FDCAN3_IT1_IRQn);
+
 #ifdef TRANSPORT_CAN
 	fdcan_init(&can1, clock_fdcan_hz(), 1000000);
 	nvic_enable(FDCAN1_IT0_IRQn);
@@ -420,7 +503,8 @@ void Reset_Handler(void) {
 		uint32_t change_us; // last time count advanced
 	} chan[8] = {0};
 
-	uint32_t t_pwm = now_us(), t_status = t_pwm, t_diag = t_pwm, t_tick = t_pwm, t_truth = t_pwm;
+	uint32_t t_pwm = now_us(), t_status = t_pwm, t_diag = t_pwm, t_tick = t_pwm, t_truth = t_pwm,
+			 t_gpsfeed = t_pwm, t_nodest = t_pwm;
 	for (;;) {
 		// console RX echo (link sanity, M0 heritage)
 		uint8_t chunk[64];
@@ -545,6 +629,22 @@ void Reset_Handler(void) {
 			}
 		}
 
+		if (gps_enable && fdm_mode && (int32_t)(now - t_gpsfeed) >= 200000) { // DroneCAN 5 Hz
+			t_gpsfeed = now;
+			gps_feed(now);
+		}
+		if (gps_enable && (int32_t)(now - t_nodest) >= 1000000) { // NodeStatus 1 Hz
+			t_nodest = now;
+			uint8_t buf[8];
+			struct DroneCanFrame fr[2];
+			int n = dronecan_broadcast(DRONECAN_NODESTATUS_ID, DRONECAN_NODESTATUS_SIGNATURE,
+			                           DRONECAN_PRIO_LOW, 42, &gps_tid_ns, buf,
+			                           dronecan_nodestatus(now / 1000000u, buf), fr, 2);
+			for (int i = 0; i < n; i++) {
+				fdcan_tx(&can_gps, 0, can_header_from29(fr[i].id29), fr[i].len, fr[i].data);
+			}
+		}
+
 		if (fdm_mode && (int32_t)(now - t_truth) >= 50000) { // TRUTH_* 20 Hz
 			t_truth = now;
 			const struct FdmTruth *ft = &fdm.truth;
@@ -586,6 +686,16 @@ void Reset_Handler(void) {
 			encode_be_uint16(p + 4, (uint16_t)sat16(ft->v_ned[2] * 100.0f));
 			encode_be_uint16(p + 6, 0);
 			can_send(CANMSG_TRUTH_VEL, p, 8);
+
+			struct GpsSnap *g = &gps_ring[gps_head++ & 7];
+			g->n_cm = ft->pos_cm[0];
+			g->e_cm = ft->pos_cm[1];
+			g->h_cm = (int32_t)(ft->h * 100.0f);
+			for (int i = 0; i < 3; i++) {
+				g->v_cms[i] = sat16(ft->v_ned[i] * 100.0f);
+			}
+			g->ias_dms = (uint16_t)sat16(sqrtf(2.0f * ft->qbar / 1.225f) * 10.0f);
+			g->us = now ? now : 1;
 		}
 
 		if ((int32_t)(now - t_status) >= 100000) { // STATUS 10 Hz
@@ -682,6 +792,29 @@ static void sensor_cs(void) { spislave_cs_handler(&sensor_bus); }
 
 #ifdef TRANSPORT_CAN
 // FDCAN1 IT0: tx events + errors — drain the event fifo (updates counters).
+static void fdcan3_it0(void) {
+	uint8_t tag;
+	uint32_t header;
+	uint16_t ts;
+	while (fdcan_tx_done(&can_gps, &tag, &header, &ts) >= 0) {
+	}
+	uint32_t ir = FDCAN3.IR;
+	if (ir & FDCAN_IR_BO) {
+		FDCAN3.CCCR &= ~FDCAN_CCCR_INIT; // bus-off recovery: rejoin after 129 idles
+		gps_busoff++;
+	}
+	FDCAN3.IR = ir & ~(FDCAN_IR_RF0N | FDCAN_IR_RF1N);
+}
+
+static void fdcan3_it1(void) { // the DUT's own traffic: drain and drop
+	uint8_t fmi, p[8];
+	uint32_t header;
+	size_t len;
+	uint16_t ts;
+	while (fdcan_rx(&can_gps, &fmi, &header, &len, p, &ts) >= 0) {
+	}
+}
+
 static void fdcan1_it0(void) {
 	uint8_t tag;
 	uint32_t header;
@@ -734,6 +867,8 @@ __attribute__((section(".isr_vector"))) const isr_t __vectors[NVIC_VECTORS] = {
 	[VECTOR(EXTI3_IRQn)] = sensor_cs,
 #ifdef TRANSPORT_CAN
 	[VECTOR(FDCAN1_IT0_IRQn)] = fdcan1_it0,
+	[VECTOR(FDCAN3_IT0_IRQn)] = fdcan3_it0,
+	[VECTOR(FDCAN3_IT1_IRQn)] = fdcan3_it1,
 	[VECTOR(FDCAN1_IT1_IRQn)] = fdcan1_it1,
 #else
 	[VECTOR(USB_LP_IRQn)] = usb_lp,

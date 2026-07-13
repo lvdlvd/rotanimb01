@@ -33,6 +33,8 @@
 //                                     u8 gust tau s (0 = gusts off)
 //                     0x47 PARAM_SET  u16 index, f32 value (fdm.h table);
 //                                     index | 0x8000 = read request -> PARAM_VAL
+//                     0x48 GPS_CFG    u8 enable, u8 lag in 10 ms units: the
+//                                     on-board DroneCAN feeder (FDCAN3 PB3/PB4)
 //   All command frames are 8 bytes, zero-padded: the decoder treats a
 //   shorter frame as truncated and refuses it (cmd_snapshot len guard).
 //   MEAS harness ->   0x40 PWM14      4 x u16 us, ch 1-4, 50 Hz + on change > 2 us
@@ -64,6 +66,7 @@ enum {
 	CANMSG_PWM_CAL = 0x45,
 	CANMSG_WIND = 0x46,
 	CANMSG_PARAM_SET = 0x47,
+	CANMSG_GPS_CFG = 0x48,
 	CANMSG_PWM14 = 0x40, // MEAS
 	CANMSG_PWM58 = 0x41,
 	CANMSG_STATUS = 0x42,

@@ -27,7 +27,7 @@ LDFLAGS = -nostartfiles -lm -lnosys $(ARCH) -T $(MEMTARGET).ld -Wl,-L,. -Wl,-L,$
 
 # cordic_math defines sinf & co as object symbols, so they beat libm at link
 # time: the whole image's float transcendentals run on the CORDIC.
-CSRC = main.c board.c sensors.c controls.c ../physics/physics.c ../bmp390inv/bmp390lin.c ../fdm/fdm.c \
+CSRC = main.c board.c sensors.c controls.c dronecan.c ../physics/physics.c ../bmp390inv/bmp390lin.c ../fdm/fdm.c \
        $(LIB)/cordic_math.c $(LIB)/cordic_stm32.c \
        $(LIB)/pwm.c $(LIB)/fdcan.c $(LIB)/spislave.c $(LIB)/gpio.c $(LIB)/clock.c $(LIB)/console.c \
        $(LIB)/usb.c $(LIB)/fmtcan.c $(LIB)/fault.c $(LIB)/tprintf.c
@@ -62,7 +62,13 @@ fdmgate: $(GEN)
 		echo "F1 gate FAIL: soft-double helpers in fdm.o"; rm -f fdmgate.o; exit 1; \
 	else echo "F1 gate: fdm.o promotion-clean, no soft-double"; rm -f fdmgate.o; fi
 
-rotanimb01.elf: $(GEN) $(CSRC) board.h $(LIB)/sections.ld fdmgate
+# the DroneCAN encoder must stay byte-exact vs frames generated with
+# ArduPilot's own libcanard (vectors in dccheck.c) — host-checked every build
+dccheck: dronecan.c dronecan.h dccheck.c
+	cc -O2 -std=c2x -Wall -Wextra -Werror -o dccheck dccheck.c dronecan.c
+	./dccheck
+
+rotanimb01.elf: $(GEN) $(CSRC) board.h $(LIB)/sections.ld fdmgate dccheck
 	$(CC) $(CFLAGS) $(CSRC) $(LDFLAGS) -o $@
 	@$(SIZE) $@ | awk 'BEGIN {printf("%6s %6s %6s  %6s %6s %s\n", "text", "data", "bss", "flash", "ram", "file")} $$1*1 == $$1 {printf("%6d %6d %6d  %6d %6d %s\n", $$1, $$2, $$3-$$1, $$1+$$2, $$2+$$3, $$6)}'
 
@@ -90,9 +96,9 @@ flash: rotanimb01.elf
 		-c shutdown
 
 clean:
-	rm -f *.o *.elf *.bin *.hex *.map $(GEN)
+	rm -f *.o *.elf *.bin *.hex *.map dccheck $(GEN)
 
-.PHONY: flash clean pinfmt fdmgate
+.PHONY: flash clean pinfmt fdmgate dccheck
 
 # a failed "narray ... > $@" must not leave a truncated target behind
 .DELETE_ON_ERROR:

@@ -37,6 +37,8 @@ static const pinconf_t board[] = {
 	// active-high INT configs; polarity follows the DUT's INT config writes).
 	PC4 | PIN_OUTPUT,               //% 22  PC4   GPIO       -    out   | DRDY_ACC: BMI088 INT1
 	PC5 | PIN_OUTPUT,               //% 23  PC5   GPIO       -    out   | DRDY_GYRO: BMI088 INT3
+	PB3_FDCAN3_RX | PIN_PULLUP,     //% GPS feed CAN RX (DroneCAN to the DUT bus)
+	PB4_FDCAN3_TX | PIN_HIGH,       //% GPS feed CAN TX
 	PB6 | PIN_OUTPUT,               //% 59  PB6   GPIO       -    out   | DRDY_BARO: BMP390 INT
 	PB7 | PIN_OUTPUT,               //% 60  PB7   GPIO       -    out   | DRDY_MAG: RM3100 DRDY
 

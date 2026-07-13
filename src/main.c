@@ -28,6 +28,7 @@
 #include "binary.h"
 #include "board.h"
 #include "canmsg.h"
+#include "controls.h"
 #include "clock.h"
 #include "exti.h"
 #include "console.h" // pulls serial.h + tprintf.h
@@ -70,7 +71,7 @@ struct CmdBox {
 	volatile uint32_t seq;   // increments per received frame
 	volatile uint32_t rx_us; // now_us() at reception
 };
-static struct CmdBox cmd_state, cmd_env, cmd_noise, cmd_fdm_mode, cmd_fdm_init;
+static struct CmdBox cmd_state, cmd_env, cmd_noise, cmd_fdm_mode, cmd_fdm_init, cmd_pwm_cal;
 
 static void cmd_store(struct CmdBox *b, const uint8_t *p, size_t len) {
 	for (size_t i = 0; i < len && i < 8; i++) {
@@ -129,16 +130,24 @@ static void host_msg(uint32_t id29, const uint8_t *p, size_t len) {
 	case CANMSG_FDM_INIT:
 		cmd_store(&cmd_fdm_init, p, len);
 		break;
+	case CANMSG_PWM_CAL:
+		cmd_store(&cmd_pwm_cal, p, len);
+		break;
 	}
 }
 
 // ---- the flight dynamics model (fdm-DESIGN.md mode 1) -------------------------
 //
-// F1: the 6-DOF runs in the 10 kHz scheduler at 1 kHz behind the mode
-// switch; until F2 wires the PWM path, the controls hold whatever
-// FDM_INIT's trim solver produced — a hands-off trimmed airframe.
+// The 6-DOF runs in the 10 kHz scheduler at 1 kHz behind the mode switch
+// (F1). Controls come from the captured servo PWM through controls_step —
+// calibration, zero-order hold, servo lag, failsafe (F2); channels never
+// seen since boot hold the FDM_INIT trim solution, so an air-start without
+// a PWM source flies trimmed instead of failing safe to idle.
 static struct Fdm fdm;
-static struct FdmControls fdm_ctl;
+static struct FdmControls fdm_ctl;      // post-lag, fed to fdm_step (F2: from PWM)
+static struct FdmControls fdm_trim_ctl; // the trim solution: hold for never-seen channels
+static volatile uint8_t fdm_crashed;    // h went below 0: integration frozen (no
+                                        // ground model in v1); FDM_INIT clears it
 static volatile uint8_t fdm_mode; // 0 = mode-0 kinematics, 1 = six-dof
 static struct PhysicsTruth fdm_pt; // adapter: fdm truth in the sampler's shape
 
@@ -281,9 +290,17 @@ static void cmd_decode(void) {
 	if (cmd_snapshot(&cmd_fdm_init, p, &seq_finit)) {
 		// alt m u16, IAS 0.1 m/s u16, heading 0.01 deg u16: trim & reset.
 		// The solver is iterative — fine here at thread level, not in an irq.
-		fdm_trim(&fdm, (float)decode_be_uint16(p),
-		         decode_be_uint16(p + 2) * 0.1f,
-		         decode_be_uint16(p + 4) * 0.01f * ((float)M_PI / 180.0f), &fdm_ctl);
+		if (fdm_trim(&fdm, (float)decode_be_uint16(p),
+		             decode_be_uint16(p + 2) * 0.1f,
+		             decode_be_uint16(p + 4) * 0.01f * ((float)M_PI / 180.0f),
+		             &fdm_trim_ctl) == 0) {
+			fdm_ctl = fdm_trim_ctl;
+			fdm_crashed = 0; // a successful air-start leaves the crater behind
+		}
+	}
+	static uint32_t seq_pcal;
+	if (cmd_snapshot(&cmd_pwm_cal, p, &seq_pcal)) {
+		controls_cal_msg(p);
 	}
 	if (cmd_snapshot(&cmd_fdm_mode, p, &seq_fmode)) {
 		fdm_mode = p[0] & 1;
@@ -350,6 +367,7 @@ void Reset_Handler(void) {
 	// the 10 kHz scheduler tick
 	physics_init();
 	fdm_defaults(&fdm); // mode 1 idles at defaults until FDM_INIT air-starts it
+	controls_defaults();
 	RCC.APB1ENR1 |= RCC_APB1ENR1_TIM7EN;
 	TIM7.PSC = (uint16_t)(clock_pclk1_timer_hz() / 1000000 - 1); // 1 MHz
 	TIM7.ARR = 100 - 1;                                          // 10 kHz
@@ -433,10 +451,15 @@ void Reset_Handler(void) {
 				}
 				if (++fdm_div >= 10) { // the 6-DOF at 1 kHz, fixed dt (fdm-DESIGN.md)
 					fdm_div = 0;
-					if (fdm_mode) {
+					if (fdm_mode && !fdm_crashed) {
 						uint32_t c0 = DWT_CYCCNT;
+						controls_step(&cap2, now, 1e-3f, &fdm_trim_ctl, &fdm_ctl);
 						fdm_step(&fdm, &fdm_ctl, 1e-3f);
 						fdm_publish_truth();
+						if (fdm.truth.h < 0.0f) {
+							fdm_crashed = 1; // freeze at the crater: the sensors
+							                 // hold the impact state, STATUS flags it
+						}
 						uint32_t c = DWT_CYCCNT - c0;
 						if (c > phys_cycles_max) {
 							phys_cycles_max = c;
@@ -503,7 +526,9 @@ void Reset_Handler(void) {
 			uint8_t p[8];
 			encode_be_uint32(p, now);
 			encode_be_uint16(p + 4, (uint16_t)(psi_deg * 100.0f)); // psi 0.01 deg
-			encode_be_uint16(p + 6, (uint16_t)((stale ? 1 : 0) | physics_flags()));
+			encode_be_uint16(p + 6, (uint16_t)((stale ? 1 : 0) | physics_flags() |
+			                                   (fdm_mode ? controls_flags() : 0) |
+			                                   (fdm_crashed ? 1 << 5 : 0)));
 			can_send(CANMSG_STATUS, p, 8);
 		}
 
@@ -552,14 +577,13 @@ void Reset_Handler(void) {
 			tprintf("usb %s bad %u drop %u\n", usb_state_str(usb_state()),
 			        (unsigned)usb_bad, (unsigned)usb_drop);
 #endif
-			char tb[16];
-			if (sensors_trace_next(tb)) {
-				tprintf("trc:");
-				int budget = 40; // bounded so the console DMA fifo can't overrun
-				do {
-					tprintf("%s", tb);
-				} while (--budget && sensors_trace_next(tb));
-				tprintf("\n");
+			if (fdm_mode) {
+				const struct FdmControls *c = controls_state();
+				const float r2cd = 18000.0f / (float)M_PI;
+				tprintf("ctl a %d e %d r %d cdeg t %d%% fs %04u%s\n",
+				        (int)(c->da * r2cd), (int)(c->de * r2cd), (int)(c->dr * r2cd),
+				        (int)(c->dt * 100.0f), controls_fs_code(),
+				        fdm_crashed ? " CRASHED" : "");
 			}
 		}
 	}

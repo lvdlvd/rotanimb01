@@ -27,7 +27,7 @@ LDFLAGS = -nostartfiles -lm -lnosys $(ARCH) -T $(MEMTARGET).ld -Wl,-L,. -Wl,-L,$
 
 # cordic_math defines sinf & co as object symbols, so they beat libm at link
 # time: the whole image's float transcendentals run on the CORDIC.
-CSRC = main.c board.c sensors.c ../physics/physics.c ../bmp390inv/bmp390lin.c ../fdm/fdm.c \
+CSRC = main.c board.c sensors.c controls.c ../physics/physics.c ../bmp390inv/bmp390lin.c ../fdm/fdm.c \
        $(LIB)/cordic_math.c $(LIB)/cordic_stm32.c \
        $(LIB)/pwm.c $(LIB)/fdcan.c $(LIB)/spislave.c $(LIB)/gpio.c $(LIB)/clock.c $(LIB)/console.c \
        $(LIB)/usb.c $(LIB)/fmtcan.c $(LIB)/fault.c $(LIB)/tprintf.c

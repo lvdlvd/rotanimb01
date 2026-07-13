@@ -26,6 +26,9 @@
 //                     0x43 FDM_MODE   u8 mode (0 kinematic / 1 six-dof), u8 flags
 //                     0x44 FDM_INIT   u16 alt m, u16 IAS 0.1 m/s, u16 heading 0.01 deg
 //                                     -> fdm trim & reset (air-start), fdm-DESIGN.md
+//                     0x45 PWM_CAL    u8 ch (0 ail 1 ele 2 thr 3 rud), u8 part;
+//                                     part 0: u16 min/trim/max us; part 1: i16
+//                                     full deflection 0.01 deg (thr: 1e-4)
 //   All command frames are 8 bytes, zero-padded: the decoder treats a
 //   shorter frame as truncated and refuses it (cmd_snapshot len guard).
 //   MEAS harness ->   0x40 PWM14      4 x u16 us, ch 1-4, 50 Hz + on change > 2 us
@@ -47,6 +50,7 @@ enum {
 	CANMSG_CMD_NOISE = 0x42,
 	CANMSG_FDM_MODE = 0x43,
 	CANMSG_FDM_INIT = 0x44,
+	CANMSG_PWM_CAL = 0x45,
 	CANMSG_PWM14 = 0x40, // MEAS
 	CANMSG_PWM58 = 0x41,
 	CANMSG_STATUS = 0x42,

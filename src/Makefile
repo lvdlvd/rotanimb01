@@ -21,11 +21,15 @@ SIZE    = $(PREFIX)size
 
 ARCH    = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
 CFLAGS  = -std=gnu23 -O2 -g3 -DPRINTF_ENABLE_FLOAT -ffreestanding -ffunction-sections -fdata-sections \
-          $(ARCH) -Wall -Wextra -Wno-pedantic -I. -I../physics -I../bmp390inv -I$(LIB)
+          $(ARCH) -Wall -Wextra -Wno-pedantic -I. -I../physics -I../bmp390inv -I../fdm -I$(LIB)
 LDFLAGS = -nostartfiles -lm -lnosys $(ARCH) -T $(MEMTARGET).ld -Wl,-L,. -Wl,-L,$(LIB) \
           -Wl,--gc-sections,-Map,rotanimb01.map
 
-CSRC = main.c board.c sensors.c ../physics/physics.c ../bmp390inv/bmp390lin.c $(LIB)/pwm.c $(LIB)/fdcan.c $(LIB)/spislave.c $(LIB)/gpio.c $(LIB)/clock.c $(LIB)/console.c \
+# cordic_math defines sinf & co as object symbols, so they beat libm at link
+# time: the whole image's float transcendentals run on the CORDIC.
+CSRC = main.c board.c sensors.c ../physics/physics.c ../bmp390inv/bmp390lin.c ../fdm/fdm.c \
+       $(LIB)/cordic_math.c $(LIB)/cordic_stm32.c \
+       $(LIB)/pwm.c $(LIB)/fdcan.c $(LIB)/spislave.c $(LIB)/gpio.c $(LIB)/clock.c $(LIB)/console.c \
        $(LIB)/usb.c $(LIB)/fmtcan.c $(LIB)/fault.c $(LIB)/tprintf.c
 
 ifeq ($(TRANSPORT),can)
@@ -50,7 +54,15 @@ devs.ld: $(NARRAY)
 $(MEMTARGET).ld: $(NARRAY)
 	$(NARRAY) -memory $(MEMTARGET) $(PERIPH) > $@
 
-rotanimb01.elf: $(GEN) $(CSRC) board.h $(LIB)/sections.ld
+# F1 gate (fdm-DESIGN.md): fdm.o alone must compile -Wdouble-promotion clean
+# and reference no soft-double helpers — its math is FPU float32 + cordic only
+fdmgate: $(GEN)
+	$(CC) $(CFLAGS) -Wdouble-promotion -Werror -c ../fdm/fdm.c -o fdmgate.o
+	@if $(PREFIX)nm -u fdmgate.o | grep -qE '__aeabi_d|__extendsfdf2|__truncdfsf2'; then \
+		echo "F1 gate FAIL: soft-double helpers in fdm.o"; rm -f fdmgate.o; exit 1; \
+	else echo "F1 gate: fdm.o promotion-clean, no soft-double"; rm -f fdmgate.o; fi
+
+rotanimb01.elf: $(GEN) $(CSRC) board.h $(LIB)/sections.ld fdmgate
 	$(CC) $(CFLAGS) $(CSRC) $(LDFLAGS) -o $@
 	@$(SIZE) $@ | awk 'BEGIN {printf("%6s %6s %6s  %6s %6s %s\n", "text", "data", "bss", "flash", "ram", "file")} $$1*1 == $$1 {printf("%6d %6d %6d  %6d %6d %s\n", $$1, $$2, $$3-$$1, $$1+$$2, $$2+$$3, $$6)}'
 
@@ -80,7 +92,7 @@ flash: rotanimb01.elf
 clean:
 	rm -f *.o *.elf *.bin *.hex *.map $(GEN)
 
-.PHONY: flash clean pinfmt
+.PHONY: flash clean pinfmt fdmgate
 
 # a failed "narray ... > $@" must not leave a truncated target behind
 .DELETE_ON_ERROR:

@@ -34,6 +34,7 @@
 #include "fault.h"
 #include "fdcan.h"
 #include "gpio.h"
+#include "fdm.h"
 #include "nvic.h"
 #include "physics.h"
 
@@ -69,7 +70,7 @@ struct CmdBox {
 	volatile uint32_t seq;   // increments per received frame
 	volatile uint32_t rx_us; // now_us() at reception
 };
-static struct CmdBox cmd_state, cmd_env, cmd_noise;
+static struct CmdBox cmd_state, cmd_env, cmd_noise, cmd_fdm_mode, cmd_fdm_init;
 
 static void cmd_store(struct CmdBox *b, const uint8_t *p, size_t len) {
 	for (size_t i = 0; i < len && i < 8; i++) {
@@ -122,7 +123,41 @@ static void host_msg(uint32_t id29, const uint8_t *p, size_t len) {
 	case CANMSG_CMD_NOISE:
 		cmd_store(&cmd_noise, p, len);
 		break;
+	case CANMSG_FDM_MODE:
+		cmd_store(&cmd_fdm_mode, p, len);
+		break;
+	case CANMSG_FDM_INIT:
+		cmd_store(&cmd_fdm_init, p, len);
+		break;
 	}
+}
+
+// ---- the flight dynamics model (fdm-DESIGN.md mode 1) -------------------------
+//
+// F1: the 6-DOF runs in the 10 kHz scheduler at 1 kHz behind the mode
+// switch; until F2 wires the PWM path, the controls hold whatever
+// FDM_INIT's trim solver produced — a hands-off trimmed airframe.
+static struct Fdm fdm;
+static struct FdmControls fdm_ctl;
+static volatile uint8_t fdm_mode; // 0 = mode-0 kinematics, 1 = six-dof
+static struct PhysicsTruth fdm_pt; // adapter: fdm truth in the sampler's shape
+
+static const struct PhysicsTruth *truth(void) { return fdm_mode ? &fdm_pt : physics_truth(); }
+
+static void fdm_publish_truth(void) {
+	const struct FdmTruth *t = &fdm.truth;
+	for (int i = 0; i < 3; i++) {
+		fdm_pt.rate[i] = t->rate[i];
+		fdm_pt.sforce[i] = t->sforce[i];
+		fdm_pt.mag[i] = t->mag[i];
+	}
+	fdm_pt.p_pa = t->p_pa;
+	fdm_pt.t_degc = t->t_degc;
+	// yaw from q_nb for the STATUS message
+	const float *q = t->quat;
+	fdm_pt.psi = atan2f(2.0f * (q[0] * q[3] + q[1] * q[2]),
+	                    1.0f - 2.0f * (q[2] * q[2] + q[3] * q[3]));
+	fdm_pt.h = t->h;
 }
 
 // IRQ priorities, 2:2 grouping: level[3:2] = preemption group, level[1:0] =
@@ -180,7 +215,7 @@ static int16_t sat16(float x) {
 
 // pull the physics truth, quantize per the live configs, commit
 static void sample_gyro(uint32_t now) {
-	const struct PhysicsTruth *t = physics_truth();
+	const struct PhysicsTruth *t = truth();
 	float lsb = 32767.0f / gyro_fullscale_dps(); // counts per deg/s
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
@@ -190,7 +225,7 @@ static void sample_gyro(uint32_t now) {
 }
 
 static void sample_accel(uint32_t now) {
-	const struct PhysicsTruth *t = physics_truth();
+	const struct PhysicsTruth *t = truth();
 	float lsb = 32767.0f / (accel_fullscale_g() * PHYSICS_G); // counts per m/s^2
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
@@ -200,7 +235,7 @@ static void sample_accel(uint32_t now) {
 }
 
 static void sample_mag(uint32_t now) {
-	const struct PhysicsTruth *t = physics_truth();
+	const struct PhysicsTruth *t = truth();
 	float lsb = mag_lsb_per_ut();
 	int32_t xyz[3];
 	for (int i = 0; i < 3; i++) {
@@ -241,6 +276,17 @@ static void cmd_decode(void) {
 		            decode_be_uint16(p + 2) * 0.1f,
 		            decode_be_uint16(p + 4) * 0.01f,
 		            (int16_t)decode_be_uint16(p + 6) * 0.01f * ((float)M_PI / 180.0f));
+	}
+	static uint32_t seq_fmode, seq_finit;
+	if (cmd_snapshot(&cmd_fdm_init, p, &seq_finit)) {
+		// alt m u16, IAS 0.1 m/s u16, heading 0.01 deg u16: trim & reset.
+		// The solver is iterative — fine here at thread level, not in an irq.
+		fdm_trim(&fdm, (float)decode_be_uint16(p),
+		         decode_be_uint16(p + 2) * 0.1f,
+		         decode_be_uint16(p + 4) * 0.01f * ((float)M_PI / 180.0f), &fdm_ctl);
+	}
+	if (cmd_snapshot(&cmd_fdm_mode, p, &seq_fmode)) {
+		fdm_mode = p[0] & 1;
 	}
 }
 
@@ -303,6 +349,7 @@ void Reset_Handler(void) {
 
 	// the 10 kHz scheduler tick
 	physics_init();
+	fdm_defaults(&fdm); // mode 1 idles at defaults until FDM_INIT air-starts it
 	RCC.APB1ENR1 |= RCC_APB1ENR1_TIM7EN;
 	TIM7.PSC = (uint16_t)(clock_pclk1_timer_hz() / 1000000 - 1); // 1 MHz
 	TIM7.ARR = 100 - 1;                                          // 10 kHz
@@ -370,16 +417,30 @@ void Reset_Handler(void) {
 		// (2 kHz), Bresenham accumulator per device for any configured ODR
 		{
 			static uint32_t done;
-			static uint32_t phys_div, acc_g, acc_a, acc_b, acc_m;
+			static uint32_t phys_div, fdm_div, acc_g, acc_a, acc_b, acc_m;
 			while (done != tim7_ticks) {
 				done++;
 				if (++phys_div >= 5) {
 					phys_div = 0;
-					uint32_t c0 = DWT_CYCCNT;
-					physics_step(5 * 100e-6f);
-					uint32_t c = DWT_CYCCNT - c0;
-					if (c > phys_cycles_max) {
-						phys_cycles_max = c;
+					if (!fdm_mode) {
+						uint32_t c0 = DWT_CYCCNT;
+						physics_step(5 * 100e-6f);
+						uint32_t c = DWT_CYCCNT - c0;
+						if (c > phys_cycles_max) {
+							phys_cycles_max = c;
+						}
+					}
+				}
+				if (++fdm_div >= 10) { // the 6-DOF at 1 kHz, fixed dt (fdm-DESIGN.md)
+					fdm_div = 0;
+					if (fdm_mode) {
+						uint32_t c0 = DWT_CYCCNT;
+						fdm_step(&fdm, &fdm_ctl, 1e-3f);
+						fdm_publish_truth();
+						uint32_t c = DWT_CYCCNT - c0;
+						if (c > phys_cycles_max) {
+							phys_cycles_max = c;
+						}
 					}
 				}
 				uint32_t hz;
@@ -393,7 +454,7 @@ void Reset_Handler(void) {
 				}
 				if ((hz = baro_rate_hz()) != 0 && (acc_b += hz) >= 10000) {
 					acc_b -= 10000;
-					const struct PhysicsTruth *t = physics_truth();
+					const struct PhysicsTruth *t = truth();
 					baro_commit(t->t_degc, t->p_pa, now);
 				}
 				if ((hz = mag_rate_hz()) != 0 && (acc_m += hz) >= 10000) {
@@ -435,7 +496,7 @@ void Reset_Handler(void) {
 		if ((int32_t)(now - t_status) >= 100000) { // STATUS 10 Hz
 			t_status = now;
 			bool stale = cmd_state.seq == 0 || now - cmd_state.rx_us > 1000000;
-			float psi_deg = physics_truth()->psi * (180.0f / (float)M_PI);
+			float psi_deg = truth()->psi * (180.0f / (float)M_PI);
 			if (psi_deg < 0) {
 				psi_deg += 360.0f;
 			}
@@ -469,13 +530,13 @@ void Reset_Handler(void) {
 		if ((int32_t)(now - t_tick) >= 1000000) { // console heartbeat 1 Hz
 			t_tick = now;
 			digitalToggle(LED);
-			const struct PhysicsTruth *pt = physics_truth();
+			const struct PhysicsTruth *pt = truth();
 			uint32_t pc = phys_cycles_max;
 			phys_cycles_max = 0;
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u ",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u ",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
 			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
-			        (unsigned)pt->p_pa, (unsigned)pc,
+			        (unsigned)pt->p_pa, (unsigned)fdm_mode, (unsigned)pc,
 			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),

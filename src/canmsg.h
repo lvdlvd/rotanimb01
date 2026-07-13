@@ -23,6 +23,11 @@
 //   TMC  -> harness   0x40 CMD_STATE  i16 V cm/s, i16 hdot cm/s, i16 psidot mrad/s, u16 flags
 //                     0x41 CMD_ENV    u16 QNH Pa/10, u16 T0 0.1K, u16 B 0.01uT, i16 incl 0.01deg
 //                     0x42 CMD_NOISE  per-sensor enable mask + levels
+//                     0x43 FDM_MODE   u8 mode (0 kinematic / 1 six-dof), u8 flags
+//                     0x44 FDM_INIT   u16 alt m, u16 IAS 0.1 m/s, u16 heading 0.01 deg
+//                                     -> fdm trim & reset (air-start), fdm-DESIGN.md
+//   All command frames are 8 bytes, zero-padded: the decoder treats a
+//   shorter frame as truncated and refuses it (cmd_snapshot len guard).
 //   MEAS harness ->   0x40 PWM14      4 x u16 us, ch 1-4, 50 Hz + on change > 2 us
 //                     0x41 PWM58      idem ch 5-8
 //                     0x42 STATUS     u32 time us, u16 psi 0.01deg, u16 flags (bit0: cmd stale), 10 Hz
@@ -40,6 +45,8 @@ enum {
 	CANMSG_CMD_STATE = 0x40, // TMC
 	CANMSG_CMD_ENV = 0x41,
 	CANMSG_CMD_NOISE = 0x42,
+	CANMSG_FDM_MODE = 0x43,
+	CANMSG_FDM_INIT = 0x44,
 	CANMSG_PWM14 = 0x40, // MEAS
 	CANMSG_PWM58 = 0x41,
 	CANMSG_STATUS = 0x42,

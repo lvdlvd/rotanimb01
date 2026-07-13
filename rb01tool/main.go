@@ -156,8 +156,10 @@ const (
 	lccMEAS = 1
 	lccTMC  = 6
 
-	cmdSTATE = 0x40 // TMC: i16 V cm/s, i16 hdot cm/s, i16 psidot mrad/s, u16 flags
-	cmdENV   = 0x41 // TMC: u16 QNH Pa/10, u16 T0 0.1K, u16 B 0.01uT, i16 incl 0.01deg
+	cmdSTATE   = 0x40 // TMC: i16 V cm/s, i16 hdot cm/s, i16 psidot mrad/s, u16 flags
+	cmdENV     = 0x41 // TMC: u16 QNH Pa/10, u16 T0 0.1K, u16 B 0.01uT, i16 incl 0.01deg
+	cmdFDMMODE = 0x43 // TMC: u8 mode (0 kinematic / 1 six-dof), u8 flags
+	cmdFDMINIT = 0x44 // TMC: u16 alt m, u16 IAS 0.1 m/s, u16 heading 0.01 deg -> trim & reset
 
 	measPWM14  = 0x40 // 4 x u16 us
 	measPWM58  = 0x41
@@ -217,12 +219,37 @@ type state struct {
 type commands struct {
 	v, hdot, psidot    float64 // m/s, m/s, deg/s
 	qnh, t0, b, incl   float64 // Pa, K, uT, deg
+	fdmMode            bool    // six-dof truth source commanded
+	initAlt, initIAS   float64 // air-start point, m and m/s
 	sentState, sentEnv uint64
 	seq                uint32
+	oneshot            []oneshotMsg // queued sends from keypresses
+}
+
+type oneshotMsg struct {
+	msgid   uint32
+	payload []byte
+}
+
+func (c *commands) fdmModePayload() []byte {
+	p := make([]byte, 8) // full frames: the harness rejects len < 8 as truncated
+	if c.fdmMode {
+		p[0] = 1
+	}
+	return p
+}
+
+func (c *commands) fdmInitPayload() []byte {
+	p := make([]byte, 8)                                    // full frames: the harness rejects len < 8 as truncated
+	binary.BigEndian.PutUint16(p[0:], uint16(c.initAlt))    // m
+	binary.BigEndian.PutUint16(p[2:], uint16(c.initIAS*10)) // 0.1 m/s
+	binary.BigEndian.PutUint16(p[4:], 0)                    // heading 0.01 deg
+	return p
 }
 
 func defaultCommands() commands {
-	return commands{qnh: 101325, t0: 288.15, b: 48.33, incl: 65.6} // physics.c defaults
+	return commands{qnh: 101325, t0: 288.15, b: 48.33, incl: 65.6, // physics.c defaults
+		initAlt: 100, initIAS: 25}
 }
 
 func (c *commands) statePayload() []byte {
@@ -400,6 +427,13 @@ func main() {
 			case 'e', 'E':
 				env := defaultCommands()
 				cmd.qnh, cmd.t0, cmd.b, cmd.incl = env.qnh, env.t0, env.b, env.incl
+			case 'm', 'M':
+				cmd.fdmMode = !cmd.fdmMode
+				cmd.oneshot = append(cmd.oneshot, oneshotMsg{cmdFDMMODE, cmd.fdmModePayload()})
+			case 'i', 'I': // air-start: trim & reset, then select the six-dof
+				cmd.fdmMode = true
+				cmd.oneshot = append(cmd.oneshot, oneshotMsg{cmdFDMINIT, cmd.fdmInitPayload()},
+					oneshotMsg{cmdFDMMODE, cmd.fdmModePayload()})
 			}
 			cmdMu.Unlock()
 		}
@@ -418,6 +452,11 @@ func main() {
 			return
 		case <-stateTick:
 			cmdMu.Lock()
+			for _, m := range cmd.oneshot { // keypress sends, in order
+				cmd.seq++
+				send(dev, m.msgid, m.payload, cmd.seq)
+			}
+			cmd.oneshot = cmd.oneshot[:0]
 			cmd.seq++
 			err := send(dev, cmdSTATE, cmd.statePayload(), cmd.seq)
 			cmd.sentState++
@@ -474,6 +513,12 @@ func repaint(port string, st *state, cmd *commands, cmdMu *sync.Mutex) {
 		bold, normal, cmd.v, cmd.hdot, cmd.psidot, cmd.sentState)
 	line("%sENV%s     QNH=%6.0f Pa   T0=%5.1f K   B=%5.2f µT   incl=%4.1f°   (sent %d)",
 		bold, normal, cmd.qnh, cmd.t0, cmd.b, cmd.incl, cmd.sentEnv)
+	mode := "0 kinematic"
+	if cmd.fdmMode {
+		mode = "1 six-dof"
+	}
+	line("%sFDM%s     mode %s (commanded)   air-start: alt %.0f m  IAS %.0f m/s  hdg 0°",
+		bold, normal, mode, cmd.initAlt, cmd.initIAS)
 	line("")
 
 	ids := make([]uint32, 0, len(st.byID))
@@ -488,7 +533,7 @@ func repaint(port string, st *state, cmd *commands, cmdMu *sync.Mutex) {
 			id>>18&0x7ff, id&0x3ffff, lccOf(id), msgidOf(id), srcidOf(id), c.n, c.rate())
 	}
 	line("")
-	line("%skeys%s  V/v speed±1  H/h climb±.5  R/r turn±1  SPACE level  P/p qnh±100  T/t temp±1  e env-reset  q quit",
+	line("%skeys%s  V/v speed  H/h climb  R/r turn  SPACE level  P/p qnh  T/t temp  e env-reset  i air-start  m fdm-mode  q quit",
 		dim, normal)
 	b.WriteString(clrEOS)
 

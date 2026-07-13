@@ -71,7 +71,8 @@ struct CmdBox {
 	volatile uint32_t seq;   // increments per received frame
 	volatile uint32_t rx_us; // now_us() at reception
 };
-static struct CmdBox cmd_state, cmd_env, cmd_noise, cmd_fdm_mode, cmd_fdm_init, cmd_pwm_cal;
+static struct CmdBox cmd_state, cmd_env, cmd_noise, cmd_fdm_mode, cmd_fdm_init, cmd_pwm_cal,
+		cmd_wind, cmd_param;
 
 static void cmd_store(struct CmdBox *b, const uint8_t *p, size_t len) {
 	for (size_t i = 0; i < len && i < 8; i++) {
@@ -97,7 +98,7 @@ static uint32_t usb_bad, usb_drop; // malformed host lines; usb_tx overflows
 #endif
 
 static void can_send(uint32_t msgid, const uint8_t *payload, size_t len) {
-	static uint8_t seq[8]; // per-message ts_seq, CANMSG_PWM14..TRUTH_CTRL
+	static uint8_t seq[16]; // per-message ts_seq, CANMSG_PWM14..PARAM_VAL
 	uint32_t id29 = canmsg_id29(CANMSG_LCC_MEAS, msgid, 0, srcid, seq[msgid - CANMSG_PWM14]++);
 #ifdef TRANSPORT_CAN
 	fdcan_tx(&can1, (uint8_t)msgid, can_header_from29(id29), len, payload); // tag = msgid
@@ -132,6 +133,12 @@ static void host_msg(uint32_t id29, const uint8_t *p, size_t len) {
 		break;
 	case CANMSG_PWM_CAL:
 		cmd_store(&cmd_pwm_cal, p, len);
+		break;
+	case CANMSG_WIND:
+		cmd_store(&cmd_wind, p, len);
+		break;
+	case CANMSG_PARAM_SET:
+		cmd_store(&cmd_param, p, len);
 		break;
 	}
 }
@@ -301,6 +308,28 @@ static void cmd_decode(void) {
 	static uint32_t seq_pcal;
 	if (cmd_snapshot(&cmd_pwm_cal, p, &seq_pcal)) {
 		controls_cal_msg(p);
+	}
+	static uint32_t seq_wind, seq_param;
+	if (cmd_snapshot(&cmd_wind, p, &seq_wind)) {
+		// i16 N/E/D cm/s, u8 gust sigma cm/s, u8 gust tau s
+		for (int i = 0; i < 3; i++) {
+			fdm.p.wind_n[i] = (int16_t)decode_be_uint16(p + 2 * i) * 0.01f;
+		}
+		fdm.p.gust_sigma = p[6] * 0.01f;
+		fdm.p.gust_tau = (float)p[7];
+	}
+	if (cmd_snapshot(&cmd_param, p, &seq_param)) {
+		unsigned idx = decode_be_uint16(p);
+		if (idx & 0x8000) { // read request: reply with PARAM_VAL
+			idx &= 0x7fff;
+			uint8_t q[8] = {0};
+			encode_be_uint16(q, (uint16_t)idx);
+			encode_be_float32(q + 2, fdm_param_get(&fdm, idx));
+			can_send(CANMSG_PARAM_VAL, q, 8);
+		} else {
+			union { uint32_t i; float f; } v = {.i = decode_be_uint32(p + 2)};
+			fdm_param_set(&fdm, idx, v.f);
+		}
 	}
 	if (cmd_snapshot(&cmd_fdm_mode, p, &seq_fmode)) {
 		fdm_mode = p[0] & 1;
@@ -547,6 +576,16 @@ void Reset_Handler(void) {
 			encode_be_uint16(p + 4, (uint16_t)sat16(cc->dr * r2cd));
 			encode_be_uint16(p + 6, (uint16_t)(cc->dt * 1000.0f));
 			can_send(CANMSG_TRUTH_CTRL, p, 8);
+
+			encode_be_uint32(p, (uint32_t)ft->pos_cm[0]);
+			encode_be_uint32(p + 4, (uint32_t)ft->pos_cm[1]);
+			can_send(CANMSG_TRUTH_POS, p, 8);
+
+			encode_be_uint16(p, (uint16_t)sat16(ft->v_ned[0] * 100.0f));
+			encode_be_uint16(p + 2, (uint16_t)sat16(ft->v_ned[1] * 100.0f));
+			encode_be_uint16(p + 4, (uint16_t)sat16(ft->v_ned[2] * 100.0f));
+			encode_be_uint16(p + 6, 0);
+			can_send(CANMSG_TRUTH_VEL, p, 8);
 		}
 
 		if ((int32_t)(now - t_status) >= 100000) { // STATUS 10 Hz

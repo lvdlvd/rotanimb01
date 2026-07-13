@@ -29,6 +29,10 @@
 //                     0x45 PWM_CAL    u8 ch (0 ail 1 ele 2 thr 3 rud), u8 part;
 //                                     part 0: u16 min/trim/max us; part 1: i16
 //                                     full deflection 0.01 deg (thr: 1e-4)
+//                     0x46 WIND       i16 N/E/D cm/s steady, u8 gust sigma cm/s,
+//                                     u8 gust tau s (0 = gusts off)
+//                     0x47 PARAM_SET  u16 index, f32 value (fdm.h table);
+//                                     index | 0x8000 = read request -> PARAM_VAL
 //   All command frames are 8 bytes, zero-padded: the decoder treats a
 //   shorter frame as truncated and refuses it (cmd_snapshot len guard).
 //   MEAS harness ->   0x40 PWM14      4 x u16 us, ch 1-4, 50 Hz + on change > 2 us
@@ -39,6 +43,9 @@
 //                     0x45 TRUTH_ATT    q_nb w x y z as i16 x 2^15, 20 Hz (fdm mode)
 //                     0x46 TRUTH_AIR    u16 IAS 0.1 m/s, u16 TAS 0.1 m/s, i16 alpha 0.01 deg, i16 beta, 20 Hz
 //                     0x47 TRUTH_CTRL   i16 da/de/dr 0.01 deg post-lag, u16 throttle 0.1 %, 20 Hz
+//                     0x48 PARAM_VAL    u16 index, f32 value: PARAM_SET readback
+//                     0x49 TRUTH_POS    i32 N cm, i32 E cm from origin, 20 Hz (fdm mode)
+//                     0x4A TRUTH_VEL    i16 vN/vE/vD cm/s, u16 pad, 20 Hz (fdm mode)
 
 #include "device.h"
 
@@ -55,6 +62,8 @@ enum {
 	CANMSG_FDM_MODE = 0x43,
 	CANMSG_FDM_INIT = 0x44,
 	CANMSG_PWM_CAL = 0x45,
+	CANMSG_WIND = 0x46,
+	CANMSG_PARAM_SET = 0x47,
 	CANMSG_PWM14 = 0x40, // MEAS
 	CANMSG_PWM58 = 0x41,
 	CANMSG_STATUS = 0x42,
@@ -63,6 +72,9 @@ enum {
 	CANMSG_TRUTH_ATT = 0x45,
 	CANMSG_TRUTH_AIR = 0x46,
 	CANMSG_TRUTH_CTRL = 0x47,
+	CANMSG_PARAM_VAL = 0x48,
+	CANMSG_TRUTH_POS = 0x49,
+	CANMSG_TRUTH_VEL = 0x4A,
 };
 
 // compose a 29-bit id (LCL=0, PRV=1, reserved=0b1001 fixed)

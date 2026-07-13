@@ -78,3 +78,9 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt);
 // ISA from the shared Hermite table: pressure Pa and density kg/m3 at h
 // metres (valid -100..5100 m). Rebuilt by fdm_defaults / PARAM_SET of qnh.
 void fdm_isa(const struct Fdm *f, float h, float *p_pa, float *rho, float *t_k);
+
+// the PARAM_SET surface: the table as float[FDM_NPARAMS] by index, with the
+// side effects (ISA rebuild on the qnh/t0 anchors) applied on write.
+// set returns 0, or -1 for an out-of-range index; get returns 0.0f there.
+int fdm_param_set(struct Fdm *f, unsigned idx, float v);
+float fdm_param_get(const struct Fdm *f, unsigned idx);

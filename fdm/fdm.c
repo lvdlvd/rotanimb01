@@ -4,6 +4,8 @@
 
 #include "cordic.h"
 
+#include <stddef.h>
+
 #define G 9.80665f
 
 // ---- ISA: cubic Hermite table over -100..5100 m, 16 knots ------------------
@@ -52,6 +54,22 @@ static void isa_eval(float h, float *p, float *rho, float *t_k) {
 	*p = h00 * isa.p[i] + h10 * isa.dh * isa.dp[i] + h01 * isa.p[i + 1] + h11 * isa.dh * isa.dp[i + 1];
 	*rho = h00 * isa.r[i] + h10 * isa.dh * isa.dr[i] + h01 * isa.r[i + 1] + h11 * isa.dh * isa.dr[i + 1];
 	*t_k = isa.t0k - isa.lapse * h;
+}
+
+int fdm_param_set(struct Fdm *f, unsigned idx, float v) {
+	if (idx >= FDM_NPARAMS) {
+		return -1;
+	}
+	((float *)&f->p)[idx] = v;
+	unsigned isa0 = (unsigned)(offsetof(struct FdmParams, qnh_pa) / sizeof(float));
+	if (idx == isa0 || idx == isa0 + 1) {
+		isa_build(f->p.qnh_pa, f->p.t0_k);
+	}
+	return 0;
+}
+
+float fdm_param_get(const struct Fdm *f, unsigned idx) {
+	return idx < FDM_NPARAMS ? ((const float *)&f->p)[idx] : 0.0f;
 }
 
 void fdm_isa(const struct Fdm *f, float h, float *p_pa, float *rho, float *t_k) {

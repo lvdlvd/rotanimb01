@@ -4,13 +4,20 @@
 NLIB  = ../../n-array/lib
 CMATH = ../../cordic-math/src
 
-golden: fdm.c golden.c fdm.h
+golden: fdm.c golden.c fdm.h turncheck
 	cc -O2 -std=c2x -Wall -Wextra -Wdouble-promotion -Werror -fno-builtin \
 	   -I$(NLIB) -I$(CMATH) -o $@ fdm.c golden.c $(NLIB)/cordic_math.c $(CMATH)/math_emul.c
 	./golden
 
+# the direction audit the eigenvalue tests can't do: aileron -> bank -> yaw
+# -> course must all agree, pulsed and held
+turncheck: fdm.c turncheck.c fdm.h
+	cc -O2 -std=c2x -Wall -Wextra -Wdouble-promotion -Werror -fno-builtin \
+	   -I$(NLIB) -I$(CMATH) -o $@ fdm.c turncheck.c $(NLIB)/cordic_math.c $(CMATH)/math_emul.c
+	./turncheck
+
 clean:
-	rm -f golden
+	rm -f golden turncheck
 
 .PHONY: clean
 .DELETE_ON_ERROR:

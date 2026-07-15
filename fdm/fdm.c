@@ -214,7 +214,9 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt) {
 		float W = p->m * G;
 		float N = W - L * ca - T * sinf(th); // gear normal force
 		if (N < 0.0f) N = 0.0f;
-		float Vgdot = (T * cth - D - GND_MU * N) / p->m;
+		float fric = GND_MU * N;
+		if (c->dt < 0.15f) fric += 400.0f; // toe brakes held below taxi power
+		float Vgdot = (T * cth - D - fric) / p->m;
 		Vg += Vgdot * dt;
 		if (Vg < 0.0f) { Vg = 0.0f; Vgdot = 0.0f; }
 		// nosewheel steering from rudder, washed out with speed (a real

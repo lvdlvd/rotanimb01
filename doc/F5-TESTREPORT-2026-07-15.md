@@ -136,13 +136,13 @@ orbit at 178 m. Total airborne time ~8 minutes.
 
 ### Acceptance verdict
 
-| leg | verdict |
-|---|---|
-| EKF healthy | PASS |
-| Takeoff (bonus: not in the original plan) | PASS — repeatable, physics-emergent Vr |
-| FBWA hands-off | PASS — 90 s, roll +-1 deg |
-| LOITER in wind | FUNCTIONAL — anchored and bounded; 74-deg banks and a 211 m downwind offset say L1/TECS need airframe tuning |
-| TECS climb | FUNCTIONAL — climbs with IAS in band, but slow; tuning |
+| leg                                       | verdict                                                                                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| EKF healthy                               | PASS                                                                                                         |
+| Takeoff (bonus: not in the original plan) | PASS — repeatable, physics-emergent Vr                                                                       |
+| FBWA hands-off                            | PASS — 90 s, roll +-1 deg                                                                                    |
+| LOITER in wind                            | FUNCTIONAL — anchored and bounded; 74-deg banks and a 211 m downwind offset say L1/TECS need airframe tuning |
+| TECS climb                                | FUNCTIONAL — climbs with IAS in band, but slow; tuning                                                       |
 
 The bench itself has no open defects. The remaining deltas are
 ArduPlane parameter tuning against this airframe (TECS_CLMB_MAX, L1
@@ -153,6 +153,29 @@ positioning from the parallel session; end goal, per the owner: "a pile
 of microcontrollers flying a simulated kitfox around just like i would
 do with my eyes and my hands and my meat brains, with some claim to
 fidelity."
+
+## Night 3 addendum: noise on, tuning holds
+
+Full sensor noise layer added (datasheet-scale, physical units before
+quantization: gyro 0.2 deg/s, accel 5 mg, mag 20 nT, baro's +-1 Pa
+already in). The acceptance mission completed WITH noise at the same
+envelope as without (max|roll| 72-75 vs 71-74, same TECS behavior):
+the estimator and controllers are not living off the harness's
+unnatural cleanliness. Found on the way: at ArduPilot's disarmed 10%
+throttle the power-based prop pushes ~160 N — the aircraft taxied
+itself in circles at idle; the ground model grew toe brakes below 15%
+power. Post-crash the DUT's estimator can latch an inverted attitude
+that never re-converges on static data (suspected railed gyro-bias
+state); the bench driver's cure is an automatic DUT reboot, exercised
+four times unattended in the final run. AUTOTUNE was flown (200 s of
+scripted doublets) but did not modify gains — its engagement
+conditions are a next-session study; rate-loop tuning for the 70-deg
+bank overshoots remains open (attitude TCONST experiments made things
+worse and were reverted). Takeoff reliability with noise: 1-in-4 with
+the current crude scripted speed-hold climb — driver polish, not
+physics. The `stray` counter read zero through every run: the old
+"stray trickle" backlog item is closed by the permanently-selected
+spislave redesign.
 
 ## (superseded) Proposal: the "balloon drop" (freeze-at-altitude) air-start
 

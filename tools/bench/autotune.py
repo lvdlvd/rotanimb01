@@ -1,4 +1,4 @@
-import sys, time, threading, math, subprocess
+import sys, time, threading, math
 sys.path.insert(0, '/private/tmp/claude-501/-Users-lvd-Project-stm32/50614b33-98b9-4f22-93e0-3259987dd941/scratchpad/bench')
 from mav import connect
 from pymavlink import mavutil
@@ -36,10 +36,10 @@ def mode(n):
     m.mav.command_long_send(m.target_system, 1, mavutil.mavlink.MAV_CMD_DO_SET_MODE, 0, 1, n, 0,0,0,0,0)
     m.recv_match(type='COMMAND_ACK', blocking=True, timeout=4)
 
-def takeoff(n):
+# proven takeoff
+def takeoff():
     rc[0], rc[1], rc[2], rc[3] = 1500, 1500, 1000, 1500
     m.mav.command_long_send(m.target_system, 1, mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 21196, 0,0,0,0,0)
-    # settle: estimator level and quiet before arming
     t0=time.time(); level=False
     while time.time()-t0<25:
         r, p = att_deg()
@@ -54,64 +54,66 @@ def takeoff(n):
     while time.time()-t0<8:
         hb = m.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
         if hb and hb.base_mode & 128: armed=True; break
-    if not armed: print(f"  attempt {n}: arm refused"); return False
+    if not armed: return False
     rc[2] = 2000
-    rotated=False; t0=time.time(); peak=0; pki=0
+    rotated=False; t0=time.time()
     while time.time()-t0<120:
         h = hud()
         if not h: continue
-        peak=max(peak,h.alt); pki=max(pki,h.airspeed)
         if not rotated and h.airspeed > 25: rc[1] = 1200; rotated=True
         if rotated:
-            # Vy climb the way a pilot does: full power, pitch for 27 m/s
             if h.airspeed > 29 and rc[1] > 1180: rc[1] -= 12
             elif h.airspeed < 25 and rc[1] < 1480: rc[1] += 12
-            if h.alt > 150:
-                rc[1] = 1500; rc[2] = 1500
-                mode(12)  # LOITER holds altitude fine once established
-                print(f"  attempt {n}: AT ALTITUDE (climb rc2 {rc[1]})"); return True
-            if h.alt < 1 and h.airspeed < 3 and time.time()-t0 > 25: break
+            if h.alt > 150: rc[1] = 1500; rc[2] = 1600; return True
+            if h.alt < 1 and h.airspeed < 3 and time.time()-t0 > 25: return False
         time.sleep(0.3)
-    print(f"  attempt {n}: failed (peak alt {peak:.0f} ias {pki:.0f})"); return False
+    return False
 
 ok=False
-for n in range(1, 6):
-    if takeoff(n): ok=True; break
+for n in range(4):
+    if takeoff(): ok=True; break
     time.sleep(3)
-if not ok: print("NO TAKEOFF"); sys.exit(1)
+print("AT ALTITUDE:", ok)
+if not ok: sys.exit(1)
 
-def sample(secs, tag, positions=None):
-    t0=time.time(); last=None; maxroll=0; alts=[]
-    while time.time()-t0<secs:
-        a = m.recv_match(type='ATTITUDE', blocking=True, timeout=2)
-        h = hud()
-        gp = m.recv_match(type='GLOBAL_POSITION_INT', blocking=False)
-        if gp is not None and positions is not None: positions.append((gp.lat/1e7, gp.lon/1e7))
-        if a and h:
-            last=(round(math.degrees(a.roll),1), round(math.degrees(a.pitch),1), round(h.airspeed,1), round(h.alt,1))
-            maxroll=max(maxroll, abs(math.degrees(a.roll))); alts.append(h.alt)
-        time.sleep(0.4)
-    print(f"  [{tag}] end {last} max|roll| {maxroll:.0f} alt {min(alts):.0f}..{max(alts):.0f}")
+# read gains before
+def getp(name):
+    for _ in range(3):
+        m.param_fetch_one(name)
+        t0=time.time()
+        while time.time()-t0<3:
+            msg = m.recv_match(type='PARAM_VALUE', blocking=True, timeout=1)
+            if msg and msg.param_id == name: return msg.param_value
+    return None
+before = {p: getp(p) for p in ['RLL_RATE_FF','RLL_RATE_P','PTCH_RATE_FF','PTCH_RATE_P']}
+print("gains before:", before)
 
-pos_calm=[]; sample(90, "LOITER calm", pos_calm)
-subprocess.run(['ssh','slon@slon.local','python3 /home/slon/drive.py wind 0 5 150 3; exit 0'], capture_output=True)
-print("  wind 5 m/s E + gusts in")
-pos_wind=[]; sample(110, "LOITER wind", pos_wind)
-def center(ps): return (sum(p[0] for p in ps)/len(ps), sum(p[1] for p in ps)/len(ps)) if ps else (0,0)
-cc, cw = center(pos_calm), center(pos_wind)
-drift = math.hypot((cw[0]-cc[0])*111319, (cw[1]-cc[1])*111319*math.cos(math.radians(52)))
-print(f"  loiter center drift: {drift:.0f} m")
-h = hud(); base = h.alt
-m.mav.command_long_send(m.target_system, 1, mavutil.mavlink.MAV_CMD_DO_CHANGE_ALTITUDE, 0, base+100, 3, 0,0,0,0,0)
-print(f"  TECS climb {base:.0f} -> {base+100:.0f}")
-ias_lo, ias_hi = 99.0, 0.0; t0=time.time(); reached=False
-while time.time()-t0<150:
+mode(8)  # AUTOTUNE
+print("AUTOTUNE: roll doublets")
+t0=time.time()
+while time.time()-t0<100:
+    rc[0] = 1800 if int(time.time()-t0) % 8 < 4 else 1200
     h = hud()
-    if h:
-        if h.airspeed > 5: ias_lo=min(ias_lo,h.airspeed); ias_hi=max(ias_hi,h.airspeed)
-        if h.alt > base + 90: reached=True; break
-    time.sleep(0.5)
-print(f"  TECS: reached {reached} in {round(time.time()-t0)}s ias {ias_lo:.1f}..{ias_hi:.1f}")
-sample(20, "hold")
-print("=== DONE ===")
+    if h and h.alt < 60: rc[1] = 1350  # don't let it sink away
+    elif h: rc[1] = 1500
+    msg = m.recv_match(type='STATUSTEXT', blocking=False)
+    if msg and 'utotune' in msg.text: print("  TEXT:", msg.text)
+    time.sleep(0.4)
+rc[0] = 1500
+print("AUTOTUNE: pitch doublets")
+t0=time.time()
+while time.time()-t0<100:
+    h = hud()
+    base = 1500
+    if h and h.alt < 70: base = 1400
+    if h and h.alt > 250: base = 1560
+    rc[1] = base - 180 if int(time.time()-t0) % 8 < 4 else base + 180
+    msg = m.recv_match(type='STATUSTEXT', blocking=False)
+    if msg and 'utotune' in msg.text: print("  TEXT:", msg.text)
+    time.sleep(0.4)
+rc[1] = 1500
+mode(5)
+after = {p: getp(p) for p in ['RLL_RATE_FF','RLL_RATE_P','PTCH_RATE_FF','PTCH_RATE_P']}
+print("gains after:", after)
+print("=== AUTOTUNE DONE (still flying) ===")
 m.close()

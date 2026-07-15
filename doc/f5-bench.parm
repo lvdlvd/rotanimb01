@@ -51,3 +51,13 @@ AIRSPEED_MIN     17
 AIRSPEED_MAX     38
 WP_LOITER_RAD    120
 TRIM_THROTTLE    45
+
+# --- night-3 additions: TECS energy limits from the model's measured
+# performance (golden: Vy climb 5.8 m/s); gentler L1
+TECS_CLMB_MAX    5
+TECS_SINK_MIN    2.8
+TECS_SINK_MAX    6
+NAVL1_PERIOD     22
+ROLL_LIMIT_DEG   40
+PTCH_LIM_MAX_DEG 20
+PTCH_LIM_MIN_DEG -18

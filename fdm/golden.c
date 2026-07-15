@@ -257,8 +257,10 @@ static void test_takeoff(void) {
 	struct FdmControls c = {0};
 	fdm_defaults(&f);
 	CHECK(f.on_ground == 1, "starts on gear");
-	// parked at idle: stays put, serves rest truth
-	run(&c, 2.0f);
+	// parked at idle: stays put, serves rest truth (idle thrust exceeds
+	// rolling friction — the toe brakes below taxi power hold it)
+	c.dt = 0.10f;
+	run(&c, 4.0f);
 	CHECK(f.truth.va < 0.1f, "parked va %g", (double)f.truth.va);
 	CHECK(fabsf(f.truth.sforce[2] + 9.80665f) < 0.05f, "parked -1g %g", (double)f.truth.sforce[2]);
 	// full throttle, stick neutral until 18 m/s, then rotate

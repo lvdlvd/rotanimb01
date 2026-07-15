@@ -321,13 +321,31 @@ static int16_t sat16(float x) {
 	return (int16_t)x;
 }
 
+// sensor noise (M7'-lite): datasheet-scale white noise in PHYSICAL units,
+// added before quantization so it tracks whatever range the DUT configures.
+// Sum of two xorshift uniforms — triangular, close enough to Gaussian for
+// an EKF's purposes. Sigmas: BMI088 gyro ~0.2 deg/s and accel ~5 mg at
+// AP's filter settings, RM3100 ~20 nT.
+static float noise(float sigma) {
+	static uint32_t rng = 0x1337c0deu;
+	rng ^= rng << 13;
+	rng ^= rng >> 17;
+	rng ^= rng << 5;
+	float u1 = (float)(int32_t)(rng & 0xffff) - 32768.0f;
+	rng ^= rng << 13;
+	rng ^= rng >> 17;
+	rng ^= rng << 5;
+	float u2 = (float)(int32_t)(rng & 0xffff) - 32768.0f;
+	return (u1 + u2) * (sigma * (1.0f / 26756.0f)); // var(u1+u2) -> sigma^2
+}
+
 // pull the physics truth, quantize per the live configs, commit
 static void sample_gyro(uint32_t now) {
 	const struct PhysicsTruth *t = truth();
 	float lsb = 32767.0f / gyro_fullscale_dps(); // counts per deg/s
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
-		xyz[i] = sat16(t->rate[i] * (180.0f / (float)M_PI) * lsb);
+		xyz[i] = sat16((t->rate[i] * (180.0f / (float)M_PI) + noise(0.2f)) * lsb);
 	}
 	gyro_commit(xyz, now);
 }
@@ -337,7 +355,7 @@ static void sample_accel(uint32_t now) {
 	float lsb = 32767.0f / (accel_fullscale_g() * PHYSICS_G); // counts per m/s^2
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
-		xyz[i] = sat16(t->sforce[i] * lsb);
+		xyz[i] = sat16((t->sforce[i] + noise(0.05f)) * lsb);
 	}
 	accel_commit(xyz, t->t_degc, now);
 }
@@ -347,7 +365,7 @@ static void sample_mag(uint32_t now) {
 	float lsb = mag_lsb_per_ut();
 	int32_t xyz[3];
 	for (int i = 0; i < 3; i++) {
-		xyz[i] = (int32_t)(t->mag[i] * lsb);
+		xyz[i] = (int32_t)((t->mag[i] + noise(0.02f)) * lsb);
 	}
 	mag_commit(xyz, now);
 }

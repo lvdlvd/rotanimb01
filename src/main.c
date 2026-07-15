@@ -339,13 +339,31 @@ static float noise(float sigma) {
 	return (u1 + u2) * (sigma * (1.0f / 26756.0f)); // var(u1+u2) -> sigma^2
 }
 
+// The gyro's nastiest error is not the white noise: it is a per-boot
+// turn-on bias plus an in-run bias that random-walks in 3D — the whole
+// reason attitude filters carry gyro-bias states and lean on accel+mag
+// as the low-bandwidth reference. Model both (BMI088-class numbers:
+// turn-on sigma 0.15 deg/s, walk 0.002 deg/s per sqrt(s)). The accel
+// gets a small fixed turn-on bias so those filter states work too.
+static float gyro_bias[3], accel_bias[3];
+static uint8_t imu_bias_init;
+
 // pull the physics truth, quantize per the live configs, commit
 static void sample_gyro(uint32_t now) {
 	const struct PhysicsTruth *t = truth();
+	if (!imu_bias_init) {
+		imu_bias_init = 1;
+		for (int i = 0; i < 3; i++) {
+			gyro_bias[i] = noise(0.15f);  // deg/s, fixed for this boot
+			accel_bias[i] = noise(0.05f); // m/s^2
+		}
+	}
+	float srw = 0.002f * sqrtf(1.0f / (float)gyro_rate_hz()); // walk step at this ODR
 	float lsb = 32767.0f / gyro_fullscale_dps(); // counts per deg/s
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
-		xyz[i] = sat16((t->rate[i] * (180.0f / (float)M_PI) + noise(0.2f)) * lsb);
+		gyro_bias[i] += noise(srw);
+		xyz[i] = sat16((t->rate[i] * (180.0f / (float)M_PI) + gyro_bias[i] + noise(0.2f)) * lsb);
 	}
 	gyro_commit(xyz, now);
 }
@@ -355,7 +373,7 @@ static void sample_accel(uint32_t now) {
 	float lsb = 32767.0f / (accel_fullscale_g() * PHYSICS_G); // counts per m/s^2
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
-		xyz[i] = sat16((t->sforce[i] + noise(0.05f)) * lsb);
+		xyz[i] = sat16((t->sforce[i] + accel_bias[i] + noise(0.05f)) * lsb);
 	}
 	accel_commit(xyz, t->t_degc, now);
 }

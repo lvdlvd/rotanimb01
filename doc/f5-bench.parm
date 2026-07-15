@@ -1,0 +1,53 @@
+# f5-bench.parm — NucleoF767ZI + rotanimb01 harness, first HITL checkride.
+# Load: MAVProxy `param load doc/f5-bench.parm`, then `reboot`.
+# Tree is post-4.6: GPS param family is GPS1_*, not GPS_*.
+
+# --- board: no safety switch on the Nucleo; PWM stays dead without this
+BRD_SAFETY_DEFLT 0
+
+# --- DroneCAN: harness FDCAN3 feeds Fix2 + RawAirData + NodeStatus (node 42)
+CAN_P1_DRIVER    1
+CAN_D1_PROTOCOL  1
+GPS1_TYPE        9
+ARSPD_TYPE       8
+ARSPD_USE        1
+# the harness diff pressure is exactly 0.5*rho0*IAS^2 — offset 0 IS the truth,
+# and skipping boot cal protects against rebooting the DUT mid-flight
+ARSPD_SKIP_CAL   1
+ARSPD_OFFSET     0
+
+# --- RC comes from GCS overrides (no receiver on the bench)
+RC_OVERRIDE_TIME 3
+THR_FAILSAFE     0
+FS_SHORT_ACTN    0
+FS_LONG_ACTN     0
+FS_GCS_ENABL     0
+
+# --- bench comfort
+RTL_AUTOLAND     2
+LOG_DISARMED     0
+LOG_BACKEND_TYPE 0
+
+# --- mark the 3D accel cal done (SITL convention): the FDM serves a constant
+#     level -1 g, so the real 6-pose dance is impossible; these tiny values
+#     satisfy accel_calibrated_ok_all with negligible (0.1%) scale error
+INS_ACCOFFS_X    0.001
+INS_ACCOFFS_Y    0.001
+INS_ACCOFFS_Z    0.001
+INS_ACCSCAL_X    1.001
+INS_ACCSCAL_Y    1.001
+INS_ACCSCAL_Z    1.001
+
+# mandatory-check clearances discovered on the bench 2026-07-15:
+# caltemp -300 = "never calibrated" sentinel; the crash dump ignore is for
+# the bench only (a real vehicle should investigate its dumps)
+INS_ACC1_CALTEMP 25
+ARMING_CRSDP_IGN 1
+
+# --- Kitfox airframe basics (first tuning pass, bench night 2):
+# default loiter radius 60 m at default speeds demanded 70-deg banks
+AIRSPEED_CRUISE  25
+AIRSPEED_MIN     17
+AIRSPEED_MAX     38
+WP_LOITER_RAD    120
+TRIM_THROTTLE    45

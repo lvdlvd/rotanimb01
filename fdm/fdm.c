@@ -8,6 +8,12 @@
 
 #define G 9.80665f
 
+// minimal tricycle ground model (hard surface); tuned constants, not params
+#define GND_MU 0.03f         // rolling resistance
+#define GND_WHEELBASE 1.60f  // nosewheel steering arm, m
+#define GND_XMG 0.30f        // mains behind the CG, m (weight's anti-rotation moment)
+#define GND_THETA_MAX 0.26f  // 15 deg rotation limit (tail strike)
+
 // ---- ISA: cubic Hermite table over -100..5100 m, 16 knots ------------------
 // Built at defaults/PARAM_SET time with the (slow) cordic expf/logf; the
 // 1 kHz path only evaluates the polynomial. Shared shape with the baro layer.
@@ -171,10 +177,16 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt) {
 	float Faz = -D * sa - L * ca;
 	float Fay = qbar * p->S * CY;
 
-	// prop: thrust along +x, torque reaction about x
-	float kmdt = p->km * c->dt;
-	float T = 0.5f * rho * p->CpSp * (kmdt * kmdt - va * va);
+	// prop: power-based thrust along +x (owner's engine/prop data: 100 hp,
+	// eta 0.50 static rising to 0.85 by cruise), capped by the momentum-
+	// theory static limit; torque reaction about x
+	float eta = 0.50f + 0.35f * (va > 40.0f ? 1.0f : va * (1.0f / 40.0f));
+	float vden = va > 1.0f ? va : 1.0f;
+	float T = eta * c->dt * 74600.0f / vden;
+	float Tcap = 1601.0f * c->dt; // static momentum limit, ~linear in power lever
+	if (T > Tcap) T = Tcap;
 	if (T < 0.0f) T = 0.0f; // no windmilling drag model
+	float kmdt = p->km * c->dt;
 	float Mx_q = -p->kQ * kmdt * kmdt;
 
 	// moments
@@ -182,6 +194,65 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt) {
 	float My = qbar * p->S * p->cbar * Cm;
 	float Mz = qbar * p->S * p->b * Cn;
 
+	float fsp[3];
+	if (f->on_ground) {
+		// ---- minimal-fidelity tricycle ground roll ------------------------
+		// DOFs: ground speed along heading, yaw (nosewheel = rudder), pitch
+		// rotation about the mains in [0, GND_THETA_MAX]; wings level. Vr is
+		// emergent: the elevator moment must beat the CG-ahead-of-mains
+		// weight moment, which needs qbar. Liftoff when lift + thrust
+		// vertical carries the weight.
+		float psi = atan2f(2.0f * (f->quat[0] * f->quat[3] + f->quat[1] * f->quat[2]),
+		                   1.0f - 2.0f * (f->quat[2] * f->quat[2] + f->quat[3] * f->quat[3]));
+		float sth = -2.0f * (f->quat[1] * f->quat[3] - f->quat[0] * f->quat[2]);
+		sth = sth > 1.0f ? 1.0f : sth < -1.0f ? -1.0f : sth;
+		float th = atan2f(sth, sqrtf(1.0f - sth * sth)), cth = cosf(th); // asin via atan2: no libm here
+		float vgn = R[0][0] * f->v_b[0] + R[0][1] * f->v_b[1] + R[0][2] * f->v_b[2];
+		float vge = R[1][0] * f->v_b[0] + R[1][1] * f->v_b[1] + R[1][2] * f->v_b[2];
+		float Vg = sqrtf(vgn * vgn + vge * vge);
+
+		float W = p->m * G;
+		float N = W - L * ca - T * sinf(th); // gear normal force
+		if (N < 0.0f) N = 0.0f;
+		float Vgdot = (T * cth - D - GND_MU * N) / p->m;
+		Vg += Vgdot * dt;
+		if (Vg < 0.0f) { Vg = 0.0f; Vgdot = 0.0f; }
+		// nosewheel steering from rudder, washed out with speed (a real
+		// nosewheel's authority fades as the wheel unloads; also keeps the
+		// DUT's ground-steering controller from spinning us like a top)
+		float k_nw = 0.30f / (1.0f + Vg * Vg * (1.0f / 64.0f));
+		float psidot = (Vg > 0.5f) ? Vg * c->dr * k_nw * (1.0f / GND_WHEELBASE) : 0.0f;
+		psidot = psidot > 0.5f ? 0.5f : psidot < -0.5f ? -0.5f : psidot;
+		psi += psidot * dt;
+
+		float thdot = f->w_b[1];
+		float thdd = (My - W * GND_XMG * cth) / p->Iyy; // rotate about the mains
+		thdot += thdd * dt;
+		th += thdot * dt;
+		if (th <= 0.0f) { th = 0.0f; if (thdot < 0.0f) thdot = 0.0f; }
+		if (th >= GND_THETA_MAX) { th = GND_THETA_MAX; if (thdot > 0.0f) thdot = 0.0f; }
+
+		if (L * ca + T * sinf(th) >= W) f->on_ground = 0; // liftoff
+
+		f->w_b[0] = 0.0f;
+		f->w_b[1] = thdot;
+		f->w_b[2] = psidot;
+		float hy = 0.5f * psi, hp2 = 0.5f * th;
+		float cy = cosf(hy), sy = sinf(hy), cp = cosf(hp2), sp = sinf(hp2);
+		f->quat[0] = cy * cp;
+		f->quat[1] = -sy * sp;
+		f->quat[2] = cy * sp;
+		f->quat[3] = sy * cp;
+		quat_to_r(f->quat, R);
+		float cpsi = cosf(psi), spsi = sinf(psi);
+		float vng[3] = {Vg * cpsi, Vg * spsi, 0.0f};
+		for (int i = 0; i < 3; i++) f->v_b[i] = R[0][i] * vng[0] + R[1][i] * vng[1];
+		// imu truth: horizontal accel + gravity reaction, into body axes
+		float an[3] = {Vgdot * cpsi - Vg * psidot * spsi, Vgdot * spsi + Vg * psidot * cpsi, -G};
+		for (int i = 0; i < 3; i++) fsp[i] = R[0][i] * an[0] + R[1][i] * an[1] + R[2][i] * an[2];
+		f->pos_cm[2] = 0;
+		f->pos_rem[2] = 0.0f;
+	} else {
 	// semi-implicit Euler: rates first
 	float wdot[3] = {(Mx - (f->w_b[1] * f->w_b[2]) * (p->Izz - p->Iyy)) / p->Ixx,
 	                 (My - (f->w_b[0] * f->w_b[2]) * (p->Ixx - p->Izz)) / p->Iyy,
@@ -189,7 +260,9 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt) {
 	for (int i = 0; i < 3; i++) f->w_b[i] += wdot[i] * dt;
 
 	// then velocity, with the NEW rates; gravity via R^T (0,0,g)
-	float fsp[3] = {(Fax + T) / p->m, Fay / p->m, Faz / p->m}; // specific force
+	fsp[0] = (Fax + T) / p->m; // specific force
+	fsp[1] = Fay / p->m;
+	fsp[2] = Faz / p->m;
 	float g_b[3] = {R[2][0] * G, R[2][1] * G, R[2][2] * G};
 	float wxv[3];
 	cross3(f->w_b, f->v_b, wxv);
@@ -205,6 +278,7 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt) {
 	float n2 = f->quat[0] * f->quat[0] + f->quat[1] * f->quat[1] + f->quat[2] * f->quat[2] + f->quat[3] * f->quat[3];
 	float inv = 1.0f / sqrtf(n2);
 	for (int i = 0; i < 4; i++) f->quat[i] *= inv;
+	}
 
 	// position: NED velocity, int32 cm accumulation
 	quat_to_r(f->quat, R);
@@ -233,7 +307,22 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt) {
 	t->va = va;
 	t->alpha = alpha;
 	t->beta = beta;
-	t->h = h;
+	t->h = f->on_ground ? 0.0f : h;
+
+	// gentle touchdown -> rollout; anything harsher leaves h < 0 for the
+	// caller's crash handling (unchanged contract)
+	if (!f->on_ground && t->h <= 0.0f && v_n[2] >= 0.0f) {
+		float phi = atan2f(2.0f * (f->quat[0] * f->quat[1] + f->quat[2] * f->quat[3]),
+		                   1.0f - 2.0f * (f->quat[1] * f->quat[1] + f->quat[2] * f->quat[2]));
+		float sth2 = -2.0f * (f->quat[1] * f->quat[3] - f->quat[0] * f->quat[2]);
+		if (v_n[2] < 2.5f && fabsf(phi) < 0.21f && sth2 > -0.05f && sth2 < 0.30f) {
+			f->on_ground = 1;
+			f->pos_cm[2] = 0;
+			f->pos_rem[2] = 0.0f;
+			f->w_b[0] = 0.0f;
+			t->h = 0.0f;
+		}
+	}
 }
 
 // ---- defaults + trim -----------------------------------------------------------
@@ -256,6 +345,7 @@ void fdm_defaults(struct Fdm *f) {
 	p->mag_n[0] = 19.97f; p->mag_n[2] = 44.01f; // the bench-cal field
 	p->qnh_pa = 101325.0f; p->t0_k = 288.15f;
 	f->quat[0] = 1.0f;
+	f->on_ground = 1; // parked on the gear; fdm_trim (air-start) clears it
 	f->rng = 0x2545F491u;
 	isa_build(p->qnh_pa, p->t0_k);
 }
@@ -277,8 +367,12 @@ int fdm_trim(struct Fdm *f, float alt_m, float ias, float heading, struct FdmCon
 	float de = -(p->Cm0 + p->Cma * alpha) / p->Cmde;
 	float CD = p->CD0 + p->kind * CL * CL;
 	float T = qbar * p->S * CD;
-	float k2 = 2.0f * T / (rho * p->CpSp) + tas * tas;
-	float dt_ = sqrtf(k2) / p->km;
+	// invert the power-based prop model (whichever branch binds)
+	float eta = 0.50f + 0.35f * (tas > 40.0f ? 1.0f : tas * (1.0f / 40.0f));
+	float vden = tas > 1.0f ? tas : 1.0f;
+	float dt_p = T * vden / (eta * 74600.0f);
+	float dt_c = T * (1.0f / 1601.0f);
+	float dt_ = dt_p > dt_c ? dt_p : dt_c;
 	if (dt_ > 1.0f) return -1;
 
 	// state: level flight, gamma = 0, theta = alpha, given heading;
@@ -297,6 +391,7 @@ int fdm_trim(struct Fdm *f, float alt_m, float ias, float heading, struct FdmCon
 	f->pos_cm[2] = (int32_t)(-alt_m * 100.0f);
 	f->pos_rem[0] = f->pos_rem[1] = f->pos_rem[2] = 0.0f;
 	f->gust[0] = f->gust[1] = f->gust[2] = 0.0f;
+	f->on_ground = 0; // air-start
 
 	if (out != 0) {
 		out->da = 0.0f; out->de = de; out->dr = 0.0f; out->dt = dt_;

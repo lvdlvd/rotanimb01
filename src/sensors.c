@@ -571,6 +571,15 @@ bool baro_commit(float t_degc, double p_pa, uint32_t now_us) {
 	if (baro_rate_hz() == 0) {
 		return false;
 	}
+	// +-1 Pa dither (BMP388-class RMS noise): ArduPilot's stuck-baro
+	// detector declares a bit-identical pressure stream unhealthy — a
+	// perfectly noise-free baro reads as broken. (M7' noise layer's
+	// first, mandatory tenant.)
+	static uint32_t rng = 0x9d2c5680u;
+	rng ^= rng << 13;
+	rng ^= rng >> 17;
+	rng ^= rng << 5;
+	p_pa += (double)((int32_t)(rng & 0xff) - 128) * (1.0 / 128.0);
 	static uint32_t praw_seed;
 	uint32_t traw, praw;
 	bmp390_inverse(&baro_cal, t_degc, p_pa, &traw, &praw, praw_seed);

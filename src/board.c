@@ -73,20 +73,24 @@ void board_init(void) {
 	RCC.AHB2ENR |= RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN;
 	RCC.APB1ENR1 |= RCC_APB1ENR1_TIM2EN | RCC_APB1ENR1_TIM3EN | RCC_APB1ENR1_SPI3EN;
 	RCC.APB2ENR |= RCC_APB2ENR_USART1EN | RCC_APB2ENR_SYSCFGEN;
-#ifdef TRANSPORT_CAN
+	// FDCAN clock in EVERY transport: the FDCAN3 DroneCAN GPS feeder is
+	// always on (TRANSPORT only selects the host link, FDCAN1 vs USB).
 	RCC.APB1ENR1 |= RCC_APB1ENR1_FDCANEN;
 	rcc_ccipr_fdcansel_set(2); // FDCAN kernel clock = PCLK1 (168 MHz: /12 -> 14 tq at 1 Mbit)
-#else
-	// UCPD dead-battery pull-downs load the USB pins out of reset: disable
+	// USB clocks unconditionally too: harmless when the host link is FDCAN1,
+	// and UCPD_DBDIS matters either way (the dead-battery pull-downs load
+	// PA11/PA12 out of reset, whichever peripheral owns those pins).
 	RCC.APB1ENR1 |= RCC_APB1ENR1_PWREN;
 	PWR.CR3 |= PWR_CR3_UCPD1_DBDIS;
 	RCC.CRRCR |= RCC_CRRCR_HSI48ON; // USB kernel clock: HSI48, CRS-trimmed on SOF
-	while (!(RCC.CRRCR & RCC_CRRCR_HSI48RDY)) {
+	// bounded (tSU(HSI48) is µs-class): no HSI48 = no USB console, but the
+	// emulation engine must come up regardless
+	for (int i = 0; i < 1000000 && !(RCC.CRRCR & RCC_CRRCR_HSI48RDY); i++) {
+		__asm volatile("");
 	}
 	rcc_ccipr_clk48sel_set(0);
 	RCC.APB1ENR1 |= RCC_APB1ENR1_USBEN | RCC_APB1ENR1_CRSEN;
 	CRS.CR |= CRS_CR_AUTOTRIMEN | CRS_CR_CEN;
-#endif
 
 	gpioConfigAll(board, sizeof board / sizeof board[0]);
 }

@@ -120,3 +120,10 @@ func TestRawAirPayloadAndFrames(t *testing.T) {
 	frames := broadcast(rawAirID, rawAirSig, prioMedium, feederNode, &tid, got)
 	checkFrames(t, frames, refRawAirFrames)
 }
+
+// reference: ArduPilot libcanard, uptime 3600 s, health OK, mode OPERATIONAL
+func TestNodeStatusFrames(t *testing.T) {
+	tid := uint8(0)
+	frames := broadcast(nodeStatusID, nodeStatusSig, prioLow, feederNode, &tid, encodeNodeStatus(3600))
+	checkFrames(t, frames, []string{"1801552a 100e0000000000c0"})
+}

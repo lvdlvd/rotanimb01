@@ -346,14 +346,21 @@ type snap struct {
 // than reality (fdm-DESIGN.md F4).
 func feeder(dev *os.File, st *state, lagMS int, lat0, lon0 float64) {
 	const mPerDegLat = 111319.4908
-	var tidFix, tidAir uint8
+	var tidFix, tidAir, tidNS uint8
 	send := func(frames []canFrame) {
 		for _, f := range frames {
 			h := mkHeader29(f.id)
 			fmt.Fprintf(dev, "%v:%s:%04x 1 0\n", h, hex.EncodeToString(f.data), checksum(h, f.data))
 		}
 	}
+	tick := 0
 	for range time.Tick(200 * time.Millisecond) {
+		// NodeStatus at 1 Hz: ArduPilot ignores a DroneCAN node it never
+		// hears a heartbeat from, no matter how good its Fix2 stream is.
+		if tick++; tick%5 == 1 {
+			send(broadcast(nodeStatusID, nodeStatusSig, prioLow, feederNode, &tidNS,
+				encodeNodeStatus(uint32(time.Since(feedEpoch)/time.Second))))
+		}
 		st.Lock()
 		var v snap
 		found := false

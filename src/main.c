@@ -28,6 +28,7 @@
 #include "binary.h"
 #include "board.h"
 #include "canmsg.h"
+#include "canmsgq.h"
 #include "controls.h"
 #include "dronecan.h"
 #include "clock.h"
@@ -45,6 +46,7 @@
 #include "pwm.h"
 #include "sensors.h"
 #include "startup.h"
+#include "remap_g4.h"
 #include "usb.h"
 
 extern const isr_t __vectors[]; // the vector table, defined at the foot of the file
@@ -157,8 +159,9 @@ static void host_msg(uint32_t id29, const uint8_t *p, size_t len) {
 static struct Fdm fdm;
 static struct FdmControls fdm_ctl;      // post-lag, fed to fdm_step (F2: from PWM)
 static struct FdmControls fdm_trim_ctl; // the trim solution: hold for never-seen channels
-static volatile uint8_t fdm_crashed;    // h went below 0: integration frozen (no
-                                        // ground model in v1); FDM_INIT clears it
+static volatile uint16_t fdm_crashes;   // harsh-contact events (latched count for
+                                        // STATUS; the wreck re-parks on its gear
+                                        // and keeps simulating — FDM_INIT clears)
 static volatile uint8_t fdm_mode; // 0 = mode-0 kinematics, 1 = six-dof
 static struct PhysicsTruth fdm_pt; // adapter: fdm truth in the sampler's shape
 
@@ -188,6 +191,27 @@ static void fdm_publish_truth(void) {
 // Node id 42. GPS_CFG (TMC 0x48) sets enable and lag at runtime.
 static struct FDCan can_gps = FDCAN_INITIALIZER(FDCAN3);
 static volatile uint32_t gps_busoff;
+
+// The G4 FDCAN has only 3 hardware tx buffers and a Fix2+RawAir burst is 13
+// frames: queue the burst (canmsgq, the flight stacks' pattern), pump from
+// the tx-complete irq. SPSC: the thread enqueues, FDCAN3_IT0 drains.
+static struct CanMsgQueue gps_q;
+
+static void gps_pump(void) { // FDCAN3_IT0 context only
+	for (struct CanMsg *m; (m = canmsgq_tail(&gps_q)) != NULL;) {
+		if (fdcan_tx(&can_gps, 0, m->header, m->len, m->payload) < 0) {
+			return; // hw buffers full: the next tx-complete irq re-pumps
+		}
+		canmsgq_pop_tail(&gps_q);
+	}
+}
+
+static void gps_enqueue(const struct DroneCanFrame *fr, int n) {
+	for (int i = 0; i < n; i++) {
+		canmsgq_enq(&gps_q, now_us(), can_header_from29(fr[i].id29), fr[i].len, fr[i].data);
+	}
+	nvic_set_pending(FDCAN3_IT0_IRQn); // all pumping happens at irq level
+}
 
 struct GpsSnap {
 	uint32_t us; // 0 = empty slot
@@ -234,16 +258,12 @@ static void gps_feed(uint32_t now) {
 	struct DroneCanFrame fr[16];
 	int n = dronecan_broadcast(DRONECAN_FIX2_ID, DRONECAN_FIX2_SIGNATURE, DRONECAN_PRIO_MEDIUM,
 	                           42, &gps_tid_fix, buf, dronecan_fix2(&fx, buf), fr, 16);
-	for (int i = 0; i < n; i++) {
-		fdcan_tx(&can_gps, 0, can_header_from29(fr[i].id29), fr[i].len, fr[i].data);
-	}
+	gps_enqueue(fr, n);
 	float ias = snap->ias_dms * 0.1f;
 	n = dronecan_broadcast(DRONECAN_RAWAIR_ID, DRONECAN_RAWAIR_SIGNATURE, DRONECAN_PRIO_MEDIUM,
 	                       42, &gps_tid_air, buf,
 	                       dronecan_rawair(0.5f * 1.225f * ias * ias, 0.0f, 288.15f, buf), fr, 16);
-	for (int i = 0; i < n; i++) {
-		fdcan_tx(&can_gps, 0, can_header_from29(fr[i].id29), fr[i].len, fr[i].data);
-	}
+	gps_enqueue(fr, n);
 }
 
 // IRQ priorities, 2:2 grouping: level[3:2] = preemption group, level[1:0] =
@@ -335,18 +355,23 @@ static void sample_mag(uint32_t now) {
 // ---- host command decode (big-endian, canmsg.h dictionary) -------------------
 
 static bool cmd_snapshot(struct CmdBox *b, uint8_t p[8], uint32_t *seq) {
-	uint32_t s;
-	do { // seq-stable copy against the RX irq
-		s = b->seq;
+	// seq-stable copy against the RX irq; bounded — under a command storm
+	// report no-news this slot rather than spin, the next 1 kHz slot retries
+	for (int try = 0; try < 8; try++) {
+		uint32_t s = b->seq;
 		for (int i = 0; i < 8; i++) {
 			p[i] = b->data[i];
 		}
-	} while (b->seq != s);
-	if (s == *seq || b->len < 8) {
-		return false;
+		if (b->seq != s) {
+			continue;
+		}
+		if (s == *seq || b->len < 8) {
+			return false;
+		}
+		*seq = s;
+		return true;
 	}
-	*seq = s;
-	return true;
+	return false;
 }
 
 static void cmd_decode(void) {
@@ -374,7 +399,7 @@ static void cmd_decode(void) {
 		             decode_be_uint16(p + 4) * 0.01f * ((float)M_PI / 180.0f),
 		             &fdm_trim_ctl) == 0) {
 			fdm_ctl = fdm_trim_ctl;
-			fdm_crashed = 0; // a successful air-start leaves the crater behind
+			fdm_crashes = 0; // a successful air-start leaves the craters behind
 		}
 	}
 	static uint32_t seq_pcal;
@@ -416,6 +441,7 @@ static void cmd_decode(void) {
 void Reset_Handler(void) __attribute__((noreturn));
 void Reset_Handler(void) {
 	narray_init_memory();
+	narray_remap0(); // RAM run model: SRAM1 to 0x0, fetches go zero-wait
 	SCB.VTOR = (uint32_t)(uintptr_t)__vectors;
 	*(volatile uint32_t *)0xE000ED88 |= 0xfu << 20; // FPU: CP10/CP11 full access
 	SCB.SHCSR |= SCB_SHCSR_USGFAULTENA;             // route usage faults to our handler
@@ -564,15 +590,34 @@ void Reset_Handler(void) {
 				}
 				if (++fdm_div >= 10) { // the 6-DOF at 1 kHz, fixed dt (fdm-DESIGN.md)
 					fdm_div = 0;
-					if (fdm_mode && !fdm_crashed) {
+					if (fdm_mode) {
 						uint32_t c0 = DWT_CYCCNT;
 						controls_step(&cap2, now, 1e-3f, &fdm_trim_ctl, &fdm_ctl);
 						fdm_step(&fdm, &fdm_ctl, 1e-3f);
-						fdm_publish_truth();
 						if (fdm.truth.h < 0.0f) {
-							fdm_crashed = 1; // freeze at the crater: the sensors
-							                 // hold the impact state, STATUS flags it
+							// harsh contact: count it and re-park the wreck on
+							// its gear, level, yaw kept — the sim stays alive
+							// (a frozen impact state poisons every ground cal
+							// the DUT runs; learned the hard way, twice)
+							fdm_crashes++;
+							const float *q = fdm.truth.quat;
+							float psi = atan2f(2.0f * (q[0] * q[3] + q[1] * q[2]),
+							                   1.0f - 2.0f * (q[2] * q[2] + q[3] * q[3]));
+							float ch = cosf(0.5f * psi), sh = sinf(0.5f * psi);
+							fdm.quat[0] = ch;
+							fdm.quat[1] = 0.0f;
+							fdm.quat[2] = 0.0f;
+							fdm.quat[3] = sh;
+							for (int i = 0; i < 3; i++) {
+								fdm.v_b[i] = 0.0f;
+								fdm.w_b[i] = 0.0f;
+							}
+							fdm.pos_cm[2] = 0;
+							fdm.pos_rem[2] = 0.0f;
+							fdm.on_ground = 1;
+							fdm_step(&fdm, &fdm_ctl, 1e-3f); // rebuild truth parked
 						}
+						fdm_publish_truth();
 						uint32_t c = DWT_CYCCNT - c0;
 						if (c > phys_cycles_max) {
 							phys_cycles_max = c;
@@ -640,9 +685,7 @@ void Reset_Handler(void) {
 			int n = dronecan_broadcast(DRONECAN_NODESTATUS_ID, DRONECAN_NODESTATUS_SIGNATURE,
 			                           DRONECAN_PRIO_LOW, 42, &gps_tid_ns, buf,
 			                           dronecan_nodestatus(now / 1000000u, buf), fr, 2);
-			for (int i = 0; i < n; i++) {
-				fdcan_tx(&can_gps, 0, can_header_from29(fr[i].id29), fr[i].len, fr[i].data);
-			}
+			gps_enqueue(fr, n);
 		}
 
 		if (fdm_mode && (int32_t)(now - t_truth) >= 50000) { // TRUTH_* 20 Hz
@@ -710,7 +753,7 @@ void Reset_Handler(void) {
 			encode_be_uint16(p + 4, (uint16_t)(psi_deg * 100.0f)); // psi 0.01 deg
 			encode_be_uint16(p + 6, (uint16_t)((stale ? 1 : 0) | physics_flags() |
 			                                   (fdm_mode ? controls_flags() : 0) |
-			                                   (fdm_crashed ? 1 << 5 : 0)));
+			                                   (fdm_crashes ? 1 << 5 : 0)));
 			can_send(CANMSG_STATUS, p, 8);
 		}
 
@@ -740,14 +783,21 @@ void Reset_Handler(void) {
 			const struct PhysicsTruth *pt = truth();
 			uint32_t pc = phys_cycles_max;
 			phys_cycles_max = 0;
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u ",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u ",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
 			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
-			        (unsigned)pt->p_pa, (unsigned)fdm_mode, (unsigned)pc,
+			        (unsigned)pt->p_pa, (unsigned)fdm_mode,
+			        fdm.on_ground ? "g" : "a", (unsigned)pc,
 			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
 			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)cmd_state.seq);
+			tprintf("gps tx %u bo %u lec %u/%u/%u/%u/%u/%u/%u ",
+			        (unsigned)can_gps.status.tx_count, (unsigned)gps_busoff,
+			        (unsigned)can_gps.status.lec_count[1], (unsigned)can_gps.status.lec_count[2],
+			        (unsigned)can_gps.status.lec_count[3], (unsigned)can_gps.status.lec_count[4],
+			        (unsigned)can_gps.status.lec_count[5], (unsigned)can_gps.status.lec_count[6],
+			        (unsigned)can_gps.status.lec_count[7]);
 #ifdef TRANSPORT_CAN
 			tprintf("can tx %u rx %u lec %u/%u/%u/%u/%u/%u/%u\n",
 			        (unsigned)can1.status.tx_count, (unsigned)can1.status.rx_count[0],
@@ -765,7 +815,7 @@ void Reset_Handler(void) {
 				tprintf("ctl a %d e %d r %d cdeg t %d%% fs %04u%s\n",
 				        (int)(c->da * r2cd), (int)(c->de * r2cd), (int)(c->dr * r2cd),
 				        (int)(c->dt * 100.0f), controls_fs_code(),
-				        fdm_crashed ? " CRASHED" : "");
+				        fdm_crashes ? " CRASHED" : "");
 			}
 		}
 	}
@@ -790,14 +840,15 @@ static void tim7(void) {
 static void spi3(void) { spislave_irq(&sensor_bus, &SPI3, DMA1_CH5); }
 static void sensor_cs(void) { spislave_cs_handler(&sensor_bus); }
 
-#ifdef TRANSPORT_CAN
-// FDCAN1 IT0: tx events + errors — drain the event fifo (updates counters).
+// FDCAN3, the GPS feeder — every transport. IT0: tx events + errors —
+// drain the event fifo (updates counters).
 static void fdcan3_it0(void) {
 	uint8_t tag;
 	uint32_t header;
 	uint16_t ts;
-	while (fdcan_tx_done(&can_gps, &tag, &header, &ts) >= 0) {
+	for (int n = 0; n < 8 && fdcan_tx_done(&can_gps, &tag, &header, &ts) >= 0; n++) {
 	}
+	gps_pump(); // hw buffers just freed (or nvic_set_pending kick): drain the queue
 	uint32_t ir = FDCAN3.IR;
 	if (ir & FDCAN_IR_BO) {
 		FDCAN3.CCCR &= ~FDCAN_CCCR_INIT; // bus-off recovery: rejoin after 129 idles
@@ -807,19 +858,24 @@ static void fdcan3_it0(void) {
 }
 
 static void fdcan3_it1(void) { // the DUT's own traffic: drain and drop
+	FDCAN3.IR = FDCAN_IR_RF0N | FDCAN_IR_RF1N; // w1c FIRST — a latched flag
+	// left set re-pends this irq forever (the 100%-CPU storm of 2026-07-15)
 	uint8_t fmi, p[8];
 	uint32_t header;
 	size_t len;
 	uint16_t ts;
-	while (fdcan_rx(&can_gps, &fmi, &header, &len, p, &ts) >= 0) {
+	// bounded per the aerospace rule: a sick fifo must not own the CPU;
+	// leftovers wait for the next frame's RF1N
+	for (int n = 0; n < 8 && fdcan_rx(&can_gps, &fmi, &header, &len, p, &ts) >= 0; n++) {
 	}
 }
 
+#ifdef TRANSPORT_CAN
 static void fdcan1_it0(void) {
 	uint8_t tag;
 	uint32_t header;
 	uint16_t ts;
-	while (fdcan_tx_done(&can1, &tag, &header, &ts) >= 0) {
+	for (int n = 0; n < 8 && fdcan_tx_done(&can1, &tag, &header, &ts) >= 0; n++) {
 	}
 	FDCAN1.IR = FDCAN1.IR & ~(FDCAN_IR_RF0N | FDCAN_IR_RF1N); // w1c all but the RX flags
 }
@@ -831,7 +887,7 @@ static void fdcan1_it1(void) {
 	uint32_t header;
 	uint16_t ts;
 	size_t len = sizeof p;
-	while (fdcan_rx(&can1, &fmi, &header, &len, p, &ts) >= 0) {
+	for (int n = 0; n < 8 && fdcan_rx(&can1, &fmi, &header, &len, p, &ts) >= 0; n++) {
 		if (can_header_isext(header)) {
 			host_msg(can_header_to29(header), p, len);
 		}
@@ -865,10 +921,11 @@ __attribute__((section(".isr_vector"))) const isr_t __vectors[NVIC_VECTORS] = {
 	[VECTOR(EXTI1_IRQn)] = sensor_cs,
 	[VECTOR(EXTI2_IRQn)] = sensor_cs,
 	[VECTOR(EXTI3_IRQn)] = sensor_cs,
-#ifdef TRANSPORT_CAN
-	[VECTOR(FDCAN1_IT0_IRQn)] = fdcan1_it0,
+	// the FDCAN3 GPS feeder runs in every transport
 	[VECTOR(FDCAN3_IT0_IRQn)] = fdcan3_it0,
 	[VECTOR(FDCAN3_IT1_IRQn)] = fdcan3_it1,
+#ifdef TRANSPORT_CAN
+	[VECTOR(FDCAN1_IT0_IRQn)] = fdcan1_it0,
 	[VECTOR(FDCAN1_IT1_IRQn)] = fdcan1_it1,
 #else
 	[VECTOR(USB_LP_IRQn)] = usb_lp,

@@ -250,6 +250,43 @@ static void test_observables(void) {
 	CHECK(c45.de > c25.de, "trim de not nose-down with speed");
 }
 
+// tricycle ground model: full-throttle takeoff from rest — rotate once the
+// elevator has authority, liftoff, then climb. Vr/liftoff are emergent; the
+// POH says ~90 m ground roll, accept a generous envelope.
+static void test_takeoff(void) {
+	struct FdmControls c = {0};
+	fdm_defaults(&f);
+	CHECK(f.on_ground == 1, "starts on gear");
+	// parked at idle: stays put, serves rest truth
+	run(&c, 2.0f);
+	CHECK(f.truth.va < 0.1f, "parked va %g", (double)f.truth.va);
+	CHECK(fabsf(f.truth.sforce[2] + 9.80665f) < 0.05f, "parked -1g %g", (double)f.truth.sforce[2]);
+	// full throttle, stick neutral until 18 m/s, then rotate
+	c.dt = 1.0f;
+	float t = 0.0f, run_m = 0.0f, t_liftoff = -1.0f;
+	while (t < 30.0f) {
+		c.de = (f.truth.va >= 18.0f) ? -0.30f : 0.0f;
+		fdm_step(&f, &c, 1e-3f);
+		t += 1e-3f;
+		if (f.on_ground) {
+			run_m = sqrtf((float)f.pos_cm[0] * (float)f.pos_cm[0] +
+			              (float)f.pos_cm[1] * (float)f.pos_cm[1]) * 0.01f;
+		} else if (t_liftoff < 0.0f) {
+			t_liftoff = t;
+		}
+		if (f.truth.h > 15.0f) break;
+	}
+	printf("takeoff: ground run %.0f m, liftoff t=%.1f s, h %.1f m, va %.1f m/s\n",
+	       (double)run_m, (double)t_liftoff, (double)f.truth.h, (double)f.truth.va);
+	CHECK(t_liftoff > 0.0f, "lifted off");
+	CHECK(run_m > 30.0f && run_m < 350.0f, "ground run %g", (double)run_m);
+	CHECK(f.truth.h > 15.0f, "climbing, h %g", (double)f.truth.h);
+	// keep climbing hands-off for a bit: no immediate stall/nose-over
+	run(&c, 5.0f);
+	CHECK(f.truth.h > 20.0f && f.truth.va > 15.0f, "climb-out h %g va %g",
+	      (double)f.truth.h, (double)f.truth.va);
+}
+
 int main(void) {
 	test_isa();
 	test_trim_envelope();
@@ -257,6 +294,7 @@ int main(void) {
 	test_quat_norm_and_stall();
 	test_modes();
 	test_observables();
+	test_takeoff();
 	printf(failures ? "FAIL (%d)\n" : "PASS\n", failures);
 	return failures != 0;
 }

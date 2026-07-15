@@ -14,8 +14,11 @@ const (
 	fix2Signature = 0xCA41E7000F37435F
 	rawAirID      = 1027
 	rawAirSig     = 0xC77DF38BA122F5DA
+	nodeStatusID  = 341
+	nodeStatusSig = 0x0F0868D0C1A7C6F1
 
 	prioMedium = 16
+	prioLow    = 24
 	feederNode = 42
 )
 
@@ -226,5 +229,16 @@ func encodeRawAir(m *rawAir) []byte {
 	o = encodeScalar(buf, o, 16, uint64(float16bits(m.airTempK)))
 	o = encodeScalar(buf, o, 16, uint64(float16bits(0))) // pitot temp
 	// covariance: len prefix omitted (TAO), zero elements
+	return buf[:(o+7)/8]
+}
+
+func encodeNodeStatus(uptimeSec uint32) []byte {
+	buf := make([]byte, 8)
+	o := uint32(0)
+	o = encodeScalar(buf, o, 32, uint64(uptimeSec))
+	o = encodeScalar(buf, o, 2, 0)  // health OK
+	o = encodeScalar(buf, o, 3, 0)  // mode OPERATIONAL
+	o = encodeScalar(buf, o, 3, 0)  // sub_mode
+	o = encodeScalar(buf, o, 16, 0) // vendor specific
 	return buf[:(o+7)/8]
 }

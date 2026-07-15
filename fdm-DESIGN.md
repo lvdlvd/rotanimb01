@@ -163,6 +163,13 @@ FLOPs ≈ 1–2 µs of each 1000 µs step, alongside the harness's ~2 % SPI
 load. Footprint: fdm.c a few KB flash, state ~100 B, param table ~60
 floats — invisible on 512 K / 128 K.
 
+*Measured at F1 (as-built):* 2972 cycles ≈ 17.7 µs per step — the
+estimate above missed that the full step (airdata + aero + prop +
+integrator + sensor-truth derivation) runs an order of magnitude more
+FLOPs than the aero core alone. Still under 2 % of the 1 kHz budget
+and invisible next to the SPI load; the ≤ 2 µs ambition is retired,
+the F1 gate figure is ≤ 20 µs.
+
 Discipline, enforced not hoped: all constants f-suffixed; build with
 `-Wdouble-promotion -Werror`; the F1 gate greps the map file for libm
 symbols (a stray `pow` quietly linking soft-double is exactly the
@@ -263,6 +270,8 @@ airspeed feeder** consumes 0x220–0x222 and republishes as DroneCAN
 Fix2 + RawAirData on the DUT's own CAN port at 5 Hz — and should delay
 by a configurable 100–200 ms: GPS latency is a first-order input to
 EKF tuning, and a zero-lag GPS would make HITL kinder than reality.
+(As-built the primary feeder lives on the harness itself — see F4
+below; the lag knob is GPS_CFG, default 150 ms.)
 
 ## Host golden model & validation
 
@@ -279,6 +288,12 @@ plotting. Validation ladder:
    damped, phugoid ~0.1–0.2 rad/s lightly damped, dutch roll ~1.5–3
    rad/s, roll subsidence τ ≈ 0.1 s, spiral slow. Catches
    sign/magnitude errors in derivatives better than any eyeballing.
+   *As-built note:* the turncheck audit (fdm/turncheck.c) proved all
+   turn-coordination signs correct, but the spiral mode over-converges
+   (bank washes out faster than a real Kitfox) and dutch-roll phasing
+   can read as "turning against bank" over short windows. Known
+   deviation, not a bug — tune Clβ/Cnβ/Clr/Cnr via PARAM_SET in the F5
+   tuning session.
 3. **Calibration checklist** (host): the six observables above as
    scripted tests.
 4. **SITL cross-check** (host, qualitative): ArduPilot's own SITL
@@ -297,7 +312,8 @@ where noted.
   integrator, trim solver; host build + CSV; validation ladder 1–3.
   No hardware required; can proceed in parallel with harness M4–M5.
 - **F1 — target port (~150).** Drop fdm.c onto the G474 at 1 kHz;
-  measure step time (expect ≤ 2 µs); gate: `-Wdouble-promotion` clean
+  measure step time (measured 17.7 µs, gate ≤ 20 µs — see the budget
+  note above); gate: `-Wdouble-promotion` clean
   and no libm/soft-double symbols in the map file; wire the
   sensor-truth struct into the existing scheduler behind the mode
   switch.
@@ -309,6 +325,15 @@ where noted.
   round-trip.
 - **F4 — feeder (host-side, ~small).** TRUTH → DroneCAN Fix2 +
   RawAirData with configurable latency, onto the DUT's CAN port.
+  *As-built:* the feeder moved **on board** — the harness itself
+  broadcasts DroneCAN on FDCAN3 (PB3/PB4, node 42): Fix2 + RawAirData
+  at 5 Hz with configurable lag (GPS_CFG, default 150 ms) +
+  NodeStatus at 1 Hz; src/dronecan.{h,c} is a freestanding UAVCAN v0
+  encoder pinned byte-exact against ArduPilot's libcanard by the
+  dccheck build gate. The host variant survives as rb01tool -gps
+  (same node 42 — run one feeder at a time; host variant has no
+  NodeStatus). Origin math is integer 1e-8 deg — float32 can't hold
+  a latitude.
 - **F5 — HITL acceptance.** Validation ladder 5; tune coefficients via
   PARAM_SET against the checklist; freeze the Kitfox table as defaults.
 
@@ -317,7 +342,18 @@ where noted.
 - **Coefficient provenance**: the ◆ values are typical-GA priors, not
   Kitfox data. The calibration checklist is the mitigation; expect one
   good tuning session, not zero.
-- **No ground model** in v1 — no auto-takeoff/landing HITL yet.
+- ~~**No ground model** in v1~~ — v1.1 grew a minimal-fidelity tricycle
+  ground model (owner's spec: pretend tricycle gear, so no pitch change
+  in the roll; accelerate to Vstall, rotate, climb at Vx; no flaps):
+  ground-speed/yaw/pitch DOFs, rolling friction with lift unloading,
+  nosewheel steering from rudder with speed washout, rotation about the
+  mains against the CG-forward weight moment (Vr is emergent), liftoff
+  when lift + thrust vertical carries the weight; gentle touchdowns
+  roll out, harsh ones re-park the wreck level with a latched crash
+  count. The prop is power-based per the owner's engine data (100 hp,
+  eta 0.50 static to 0.85 at cruise, momentum-theory static cap).
+  Air-start teleports turned out EKF-hostile — real takeoffs are the
+  transition mechanism now (full story in doc/F5-TESTREPORT).
 - **Stall is symmetric and gentle** by construction; spin/ground-loop
   class behavior is out of scope.
 - **Prop effects** limited to thrust + torque reaction; no P-factor /

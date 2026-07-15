@@ -59,6 +59,7 @@ struct Fdm {
 	float pos_rem[3]; // sub-cm carry
 	float gust[3];    // Gauss-Markov state, NED m/s
 	uint32_t rng;     // xorshift for gusts
+	uint8_t on_ground; // tricycle ground-roll mode (minimal fidelity)
 	// derived per step
 	struct FdmTruth truth;
 };

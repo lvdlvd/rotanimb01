@@ -56,21 +56,23 @@ def takeoff(n):
         if hb and hb.base_mode & 128: armed=True; break
     if not armed: print(f"  attempt {n}: arm refused"); return False
     rc[2] = 2000
-    rotated=False; t0=time.time(); peak=0; pki=0
+    rotated=False; t0=time.time(); peak=0; pki=0; ias_f=0.0
     while time.time()-t0<120:
         h = hud()
         if not h: continue
         peak=max(peak,h.alt); pki=max(pki,h.airspeed)
-        if not rotated and h.airspeed > 25: rc[1] = 1200; rotated=True
+        ias_f = 0.6*ias_f + 0.4*h.airspeed  # EMA against sensor noise
+        if not rotated and ias_f > 24: rc[1] = 1280; rotated=True
         if rotated:
-            # Vy climb the way a pilot does: full power, pitch for 27 m/s
-            if h.airspeed > 29 and rc[1] > 1180: rc[1] -= 12
-            elif h.airspeed < 25 and rc[1] < 1480: rc[1] += 12
+            # proportional Vy hold: pitch for 27 m/s, rate-limited
+            tgt = 1350 - 10.0*(ias_f - 27.0)
+            tgt = max(1180, min(1500, tgt))
+            rc[1] += max(-25, min(25, int(tgt - rc[1])))
             if h.alt > 150:
                 rc[1] = 1500; rc[2] = 1500
-                mode(12)  # LOITER holds altitude fine once established
-                print(f"  attempt {n}: AT ALTITUDE (climb rc2 {rc[1]})"); return True
-            if h.alt < 1 and h.airspeed < 3 and time.time()-t0 > 25: break
+                mode(12)
+                print(f"  attempt {n}: AT ALTITUDE"); return True
+            if h.alt < 1 and ias_f < 3 and time.time()-t0 > 25: break
         time.sleep(0.3)
     print(f"  attempt {n}: failed (peak alt {peak:.0f} ias {pki:.0f})"); return False
 
@@ -81,17 +83,26 @@ for n in range(1, 6):
 if not ok: print("NO TAKEOFF"); sys.exit(1)
 
 def sample(secs, tag, positions=None):
-    t0=time.time(); last=None; maxroll=0; alts=[]
+    t0=time.time(); last=None; maxroll=0; alts=[]; trk=[]; dmd=[]
     while time.time()-t0<secs:
         a = m.recv_match(type='ATTITUDE', blocking=True, timeout=2)
         h = hud()
+        nav = m.recv_match(type='NAV_CONTROLLER_OUTPUT', blocking=False)
         gp = m.recv_match(type='GLOBAL_POSITION_INT', blocking=False)
         if gp is not None and positions is not None: positions.append((gp.lat/1e7, gp.lon/1e7))
         if a and h:
-            last=(round(math.degrees(a.roll),1), round(math.degrees(a.pitch),1), round(h.airspeed,1), round(h.alt,1))
-            maxroll=max(maxroll, abs(math.degrees(a.roll))); alts.append(h.alt)
+            roll = math.degrees(a.roll)
+            last=(round(roll,1), round(math.degrees(a.pitch),1), round(h.airspeed,1), round(h.alt,1))
+            maxroll=max(maxroll, abs(roll)); alts.append(h.alt)
+            if nav is not None:
+                trk.append(abs(roll - nav.nav_roll)); dmd.append(abs(nav.nav_roll))
         time.sleep(0.4)
-    print(f"  [{tag}] end {last} max|roll| {maxroll:.0f} alt {min(alts):.0f}..{max(alts):.0f}")
+    if trk:
+        trk.sort(); dmd.sort()
+        print(f"  [{tag}] end {last} max|roll| {maxroll:.0f} alt {min(alts):.0f}..{max(alts):.0f}"
+              f" | demand p50/max {dmd[len(dmd)//2]:.0f}/{dmd[-1]:.0f} track-err p50/max {trk[len(trk)//2]:.1f}/{trk[-1]:.0f}")
+    else:
+        print(f"  [{tag}] end {last} max|roll| {maxroll:.0f} alt {min(alts):.0f}..{max(alts):.0f}")
 
 pos_calm=[]; sample(90, "LOITER calm", pos_calm)
 subprocess.run(['ssh','slon@slon.local','python3 /home/slon/drive.py wind 0 5 150 3; exit 0'], capture_output=True)

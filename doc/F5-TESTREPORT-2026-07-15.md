@@ -177,10 +177,21 @@ were established. Re-flown with proper bank-crossing reversals and
 in-mode gain readback: roll learned FF 3.00 / P 4.84 / D 0.38 (9x the
 default FF — the airframe's 53 deg/s full-aileron authority), pitch
 reached FF 1.62 / P 1.57 / D 0.17 before running out of sky
-(candidates in f5-bench.parm). With them the mission still completes;
-residual 60-75 deg loiter excursions now look demand-side (L1 + gust
-response) rather than tracking error — demand-vs-achieved logging is
-the next instrumentation step. Takeoff reliability with noise: 1-in-4 with
+(candidates in f5-bench.parm). Night-4 A/B verdict: the autotuned
+ROLL gains are good (mission completes, no departures); both autotuned
+PITCH sets destabilize — their ladders ended in crashes and the
+oscillation detector was reading the departure itself. Pitch stays at
+defaults; its FF did converge (~1.65 twice), so a completed tune wants
+more altitude and gentler floor recovery. Demand-vs-achieved logging
+(now in the mission driver) reframes the loiter question: even at the
+owner-prescribed rate-turn radius (300 m), L1 demands median 37 deg
+of bank where geometry needs 19 — the orbit never settles — and
+median roll tracking error is ~20 deg across all gain sets (60 ms
+servo lag phase cost + flying 32-36 m/s instead of 25 because TECS
+can't hold speed in turns with default pitch). Next: dataflash logs
+for offline loop analysis instead of more blind runs. The takeoff
+driver's proportional EMA speed-hold made first-attempt departures
+routine. Takeoff reliability with noise: 1-in-4 with
 the current crude scripted speed-hold climb — driver polish, not
 physics. The `stray` counter read zero through every run: the old
 "stray trickle" backlog item is closed by the permanently-selected

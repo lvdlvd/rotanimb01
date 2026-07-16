@@ -1,7 +1,7 @@
 #pragma once
 
 // rotanimb01 board definition — STM32G474RET6 64-pin breakout wired as the
-// HITL sensor-simulator harness (../DESIGN.md "Pinout"). Role names for every
+// HITL sensor-simulator harness (../doc/DESIGN.md "Pinout"). Role names for every
 // signal the application drives or reads; the pinconf table and board_init()
 // live in board.c.
 

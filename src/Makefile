@@ -1,4 +1,4 @@
-# rotanimb01 — HITL sensor simulator for ArduPlane (see ../DESIGN.md).
+# rotanimb01 — HITL sensor simulator for ArduPlane (see ../doc/DESIGN.md).
 # STM32G474RET6 (LQFP64, 64-pin breakout), built on [N]Array.
 
 # TRANSPORT=usb (default): host link = pseudocan lines over the USB VCP

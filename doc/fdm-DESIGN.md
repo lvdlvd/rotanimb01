@@ -1,6 +1,6 @@
 # HITL layer 2 — Kitfox V flight dynamics model
 
-Status: design. Companion to hitl-sim-DESIGN.md (the harness), which
+Status: design. Companion to DESIGN.md (the harness), which
 this layers on top of: the kinematic speed/climb/turn command model of
 that doc becomes **mode 0**; this document specifies **mode 1**, a
 closed-loop 6-DOF fixed-wing model. The DUT's PWM outputs (rudder,

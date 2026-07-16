@@ -1,4 +1,4 @@
-// rotanimb01 — HITL sensor simulator for ArduPlane (design in ../DESIGN.md).
+// rotanimb01 — HITL sensor simulator for ArduPlane (design in ../doc/DESIGN.md).
 //
 // M2 state: M0 skeleton (clock, console on USART1, vector manifest, fault
 // machinery, heartbeat) + the 8-channel PWM capture (lib/pwm capture on TIM2+TIM3,

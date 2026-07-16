@@ -16,3 +16,6 @@
 __pycache__/
 /src/mav.parm
 /src/mav.tlog*
+/tools/bench/bench
+/tools/bench/bench-linux-arm64
+/tools/bench/*.csv

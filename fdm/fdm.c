@@ -1,4 +1,4 @@
-// fdm.c — see fdm.h and ../fdm-DESIGN.md. Freestanding: cordic.h only.
+// fdm.c — see fdm.h and ../doc/fdm-DESIGN.md. Freestanding: cordic.h only.
 
 #include "fdm.h"
 

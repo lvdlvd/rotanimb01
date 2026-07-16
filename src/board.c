@@ -1,5 +1,5 @@
 // rotanimb01 board pinout and bring-up (roles in board.h, rationale in
-// ../DESIGN.md, v3 topology). The harness serves all four devices on ONE
+// ../doc/DESIGN.md, v3 topology). The harness serves all four devices on ONE
 // SPI3 slave (SSM), demuxed by four CS inputs on PC0..PC3 (both-edge EXTI).
 // SPI1/SPI2 pins stay reserved (analog) as the hybrid fallback. TIM2/TIM3
 // capture 8 PWM outputs of the DUT; FDCAN1 talks to the host.

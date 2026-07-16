@@ -197,6 +197,42 @@ physics. The `stray` counter read zero through every run: the old
 "stray trickle" backlog item is closed by the permanently-selected
 spislave redesign.
 
+## Night 5: the instrumented loiter campaign
+
+Owner definitions encoded as bench-standard legs: STANDARD loiter =
+3 deg/s at (cruise+stall)/2; FAST loiter = 6 deg/s at cruise. The
+instrumented mission (25 Hz ATTITUDE, 10 Hz NAV/HUD, CSV) flew them
+and the analysis produced a chain of findings, each unblocking the
+next:
+
+1. The model's true cruise is ~38 m/s at 45% throttle — matching the
+   owner's 90 kt Kitfox (the prop model IS his engine). The bench had
+   been flying with AIRSPEED_CRUISE 25, an arbitrary early guess.
+2. First legs commanded 22 m/s — BELOW the accelerated stall at the
+   banks demanded (40 deg -> load factor 1.3 -> stall 22.6). The
+   "rosette" loiters were the aircraft mushing in and out of stall
+   while TECS hunted throttle 0-100%. Corrected legs: standard 29 m/s
+   R553, fast 38 m/s R363.
+3. Mechanism traps: WP_LOITER_RAD is LATCHED at LOITER entry (change
+   requires a mode re-entry); DO_CHANGE_SPEED does not take effect in
+   LOITER (set AIRSPEED_CRUISE instead — TECS reads it live).
+4. The remaining L1 problem, now precisely characterized: the aircraft
+   orbits a point hundreds of metres from the commanded center at
+   SATURATED bank demand (median 37-40 deg where geometry wants 9-22),
+   radius forced to V^2/(g tan 40) ~ 200 m regardless of command —
+   loiter capture never completes. This is the open tuning target
+   (NAVL1_PERIOD/damping study with the corrected speeds).
+5. Fidelity milestone: the gyro bias random walk makes DCM (the backup
+   estimator) drift ~18 deg while EKF3 tracks fine, tripping the
+   DCM-vs-EKF arming consistency check — the bench now reproduces
+   ArduPilot's real-world arming annoyances. Bench cure: reboot.
+6. The scripted FBWA manual climb is the campaign's reliability
+   bottleneck (entangled with FC param state). With the ground model +
+   nosewheel washout now in, ArduPlane's own TAKEOFF mode (abandoned
+   on night 3 for the pre-ground-model rotation bug) should be re-
+   tried as the standard departure — auto-throttle, TECS-flown, no
+   script fragility.
+
 ## (superseded) Proposal: the "balloon drop" (freeze-at-altitude) air-start
 
 Add a HOLD flag to FDM_INIT: teleport to altitude but stay FROZEN,

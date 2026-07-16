@@ -16,8 +16,14 @@ turncheck: fdm.c turncheck.c fdm.h
 	   -I$(NLIB) -I$(CMATH) -o $@ fdm.c turncheck.c $(NLIB)/cordic_math.c $(CMATH)/math_emul.c
 	./turncheck
 
+# SITL JSON backend: ArduPilot SITL flying THIS fdm (SIL under the HIL).
+# Run it, then: arduplane --model JSON:127.0.0.1 --speedup 10 ...
+sitljson: fdm.c sitljson.c fdm.h
+	cc -O2 -std=c2x -Wall -Wextra -Wdouble-promotion -Werror -fno-builtin \
+	   -I$(NLIB) -I$(CMATH) -o $@ fdm.c sitljson.c $(NLIB)/cordic_math.c $(CMATH)/math_emul.c
+
 clean:
-	rm -f golden turncheck
+	rm -f golden turncheck sitljson
 
 .PHONY: clean
 .DELETE_ON_ERROR:

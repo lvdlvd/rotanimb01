@@ -12,3 +12,7 @@
 /bmp390inv/golden
 /rb01tool/rb01tool
 /fdm/turncheck
+/fdm/sitljson
+__pycache__/
+/src/mav.parm
+/src/mav.tlog*

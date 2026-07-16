@@ -22,6 +22,16 @@ below). The air-start teleport is fundamentally hostile to an EKF+
 controller that is already flying the plane. This needs a small FDM
 feature (proposal at the end), not more attempts.
 
+**UPDATE (nights 6-7, 2026-07-16): everything above is closed.** The
+ground model made TAKEOFF mode the standard departure (night 6, after
+disabling the DCM fallback the gyro bias walk corrupts); the SITL rig
+completed the pitch autotune; and after three latent bench defects
+fell (RAM-only PWM cal, RAM-only autotune roll gains, ARSPD_RATIO),
+both owner-defined loiter legs fly on the bench IDENTICALLY to the
+pure-software model: std 29.0±0.1 m/s R568, fast 38.0±0.1 m/s R374.
+See "Night 7" below. F5 acceptance: takeoff, FBWA, LOITER (both
+legs), TECS — all PASS through the full emulated sensor path.
+
 ## What was proven working (in dependency order)
 
 | layer                                     | evidence                                                                                             |
@@ -232,6 +242,93 @@ next:
    on night 3 for the pre-ground-model rotation bug) should be re-
    tried as the standard departure — auto-throttle, TECS-flown, no
    script fragility.
+
+## Night 6: TAKEOFF mode, and the DCM saboteur
+
+Re-tried ArduPlane's TAKEOFF mode per the night-5 recommendation. First
+attempts reproduced the night-3 no-rotation failure — and the harness
+console (which sees the servo PWM directly) showed why: +19 deg of
+sustained NOSE-DOWN elevator during the ground roll. The controllers
+were intermittently flying DCM's attitude, not EKF3's. The gyro bias
+random walk (deliberate fidelity, see night 3) walks DCM ~18 deg off
+while EKF3 tracks fine; whenever ArduPilot's AHRS elected the DCM
+fallback, the elevator chased a phantom pitch-up. AHRS_OPTIONS 1
+(disable fixed-wing DCM fallback) fixed TAKEOFF mode on the first
+attempt after setting it. TKOFF_* values in doc/f5-bench.parm.
+
+Two failure classes in one root cause: the same DCM drift also causes
+the intermittent "DCM Roll/Pitch inconsistent" arm refusals. The bias
+walk has now claimed both an estimator consumer and an arming check —
+exactly the class of integration bug HITL exists to surface.
+
+## Night 7: the SITL rig — tune at 10x, validate through the hardware
+
+Real-bench tuning iterations cost ~10 min each (real-time flight +
+power-cycle liturgy), and the remaining work was all tuning. So the
+SAME fdm.c the harness flies got a second harness: fdm/sitljson wraps
+it as an ArduPilot SITL "JSON backend" (lockstep UDP), and stock SITL
+arduplane flies it at --speedup 10 with no hardware in the loop.
+SIL under the HIL: iterate fast against identical physics, then push
+the result through the real SPI/DroneCAN sensor path for validation.
+Tools: tools/bench/sitl{params,fly,tune,loiter}.py; lessons encoded
+there (TKOFF_THR_MINSPD=0 for wheeled starts; AUTOTUNE_AXES=2;
+in-mode gain readback; in-mode altitude-floor recovery).
+
+Results, ~30 min wall clock:
+
+1. PITCH AUTOTUNE COMPLETED — the thing the bench never got through.
+   26 elevator reversals, both ladders clean ("PitchD: 0.4981",
+   "PitchP: 8.3447", "Pitch: Finished"), no floor recovery needed at
+   400 m working altitude. FF converged to 1.6387 — matching the ~1.65
+   the bench runs converged to twice before dying (cross-check that
+   SITL physics = bench physics). Full set in doc/f5-bench.parm.
+2. The night-5 open problem DISSOLVED. A/B in SITL:
+   - new pitch gains: standard leg ias 29.0+-0.0 (cmd 29), roll 9.1
+     (geometry wants 8.8), R 569+-0 (cmd 553); fast leg ias 38.0+-0.0,
+     roll 22.8 (wants 22), R 374+-19 (cmd 363). Capture completes,
+     nothing saturates.
+   - default pitch gains: the ENTIRE night-5 pathology reproduces —
+     ias 38 vs 29 commanded, +-25 m phugoid, throttle railing 0-80%,
+     bank demand oscillating to 30+-12.
+   The "L1 capture mystery" was never L1: with FF=0/P=0.345 the pitch
+   loop can't track TECS demands, energy control degenerates into a
+   phugoid, and L1's geometry never materializes. NAVL1_PERIOD sweeps
+   were treating the symptom.
+3. Bench validation was a saga of its own that closed THREE latent
+   defects before it passed:
+   - TKOFF_THR_MINSPD must be 0 for a wheeled standing start (nonzero
+     is a hand-launch feature: throttle stays suppressed until GPS
+     speed exceeds it = deadlock, "Timeout AUTO" spam).
+   - The harness PWM cal is RAM-ONLY. A uhubctl power cycle had
+     rebooted the harness and silently reverted the elevator to the
+     all-positive default = INVERTED for ArduPilot (pwm-high must be
+     nose-up). Symptom: elevator railed 18.8 deg nose-down, ground
+     roll through 53 m/s, no rotation. Fix + procedure: drive.py
+     'cal' (elevator defl -25 deg), resend after EVERY harness reboot.
+   - The night-4 autotuned ROLL gains had silently REVERTED to
+     defaults: a completed AUTOTUNE keeps its gains in RAM only, and
+     the first DUT reboot after night 4 dropped them. Instrumented
+     loiter (truth-vs-EKF-vs-servo cross-correlation) pinned it:
+     EKF roll = truth roll (r=1.000, no estimator lag), servo tracks
+     the FC's demand with no lag, but TRUTH ROLL LAGS DEMAND 4.7 s —
+     the default-gain roll loop inside L1's ~17 s loop = limit cycle.
+     THIS was night 5's "L1 capture mystery" all along; every L1
+     period sweep was flown on default roll gains without knowing it.
+     Roll gains are now param_set (persists in FC storage) and the
+     parm file says to verify by readback each session.
+   - Bycatch: ARSPD_RATIO must be 2/rho0 = 1.6327, not the 2.0
+     default — the DUT read IAS 10.7% high (GPS 41.8 vs IAS 45.7 at
+     zero wind) since night 1.
+4. FINAL BENCH VALIDATION PASS (2026-07-16), identical to SITL to
+   the meter, full sensor path in the loop (SPI emulation + noise +
+   gyro bias walk + DroneCAN GPS/airspeed + EKF3):
+   - standard leg: ias 29.0+-0.1 (cmd 29), roll 9.1+-0.6 (geometry
+     8.8), R 568+-1 m (cmd 553; SITL flew 569).
+   - fast leg: ias 38.0+-0.1 (cmd 38), roll 22.7+-1.2 (geometry 22),
+     R 374+-2 m (cmd 363; SITL flew 374).
+   The HITL bench now flies exactly like the model says it should.
+   The residual +3% radius overshoot is L1's known loiter behavior,
+   identical on both rigs.
 
 ## (superseded) Proposal: the "balloon drop" (freeze-at-altitude) air-start
 

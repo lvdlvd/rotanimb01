@@ -12,9 +12,12 @@ GPS1_TYPE        9
 ARSPD_TYPE       8
 ARSPD_USE        1
 # the harness diff pressure is exactly 0.5*rho0*IAS^2 — offset 0 IS the truth,
-# and skipping boot cal protects against rebooting the DUT mid-flight
+# and skipping boot cal protects against rebooting the DUT mid-flight.
+# RATIO must be 2/rho0 = 1.6327, NOT the 2.0 default: at default the DUT
+# reads IAS 10.7% high (caught night 7: GPS 41.8 m/s vs IAS 45.7 zero-wind)
 ARSPD_SKIP_CAL   1
 ARSPD_OFFSET     0
+ARSPD_RATIO      1.6327
 
 # --- RC comes from GCS overrides (no receiver on the bench)
 RC_OVERRIDE_TIME 3
@@ -49,7 +52,7 @@ ARMING_CRSDP_IGN 1
 AIRSPEED_CRUISE  38   # the model's true cruise (45% throttle) = owner's 90 kt
 AIRSPEED_MIN     21
 AIRSPEED_MAX     46
-WP_LOITER_RAD    120
+WP_LOITER_RAD    553  # standard-loiter default; see leg definitions below
 TRIM_THROTTLE    45
 
 # --- night-3 additions: TECS energy limits from the model's measured
@@ -57,7 +60,8 @@ TRIM_THROTTLE    45
 TECS_CLMB_MAX    5
 TECS_SINK_MIN    2.8
 TECS_SINK_MAX    6
-NAVL1_PERIOD     22
+NAVL1_PERIOD     17   # night-5 sweep value; with the pitch tune in, capture
+                      # is clean here — no need for further reduction
 ROLL_LIMIT_DEG   40
 PTCH_LIM_MAX_DEG 20
 PTCH_LIM_MIN_DEG -18
@@ -66,17 +70,49 @@ PTCH_LIM_MIN_DEG -18
 # no departures). This airframe wants ~9x the default FF: low control
 # authority (53 deg/s full aileron). NOTE: AP_AutoTune RESTORES gains on
 # mode exit unless both D and P limits were found — read gains while still
-# in the mode (tools/bench/autotune2.py).
+# in the mode (tools/bench/autotune2.py). NIGHT-7 TRAP: even a completed
+# autotune only holds its gains in RAM — the first DUT reboot after
+# night 4 silently reverted these to defaults, and the whole night-5
+# "L1 loiter mystery" was flown on DEFAULT roll gains (4.7 s
+# roll-vs-demand lag inside L1's loop = limit cycle). param_set them
+# explicitly (that persists) and VERIFY by readback each session start.
 RLL_RATE_FF      3.0047
 RLL_RATE_P       4.8389
+RLL_RATE_I       0.15
 RLL_RATE_D       0.3832
-# PITCH stays at DEFAULTS (0.345/0.04/0): both autotuned pitch sets came
-# from ladders that ended in crashes (the oscillation detector was reading
-# the departure itself) and destabilize the loiter — A/B proven night 4.
-# Pitch FF did converge to ~1.65 across runs; a completed tune needs more
-# altitude margin and gentler floor recovery. Loiter geometry per the
-# owner: rate-1/rate-2 turns, not tight circles.
-WP_LOITER_RAD    300
+
+# --- AUTOTUNE-learned PITCH gains (SITL rig, 2026-07-16): the bench
+# ladders kept dying at the altitude floor; the same fdm.c under
+# ArduPilot's SITL JSON backend (fdm/sitljson, tools/bench/sitl*.py)
+# completed both ladders cleanly at 10x real-time. FF matches the ~1.65
+# the bench converged to twice. A/B in SITL: these gains -> both loiter
+# legs textbook (ias exact, R +3%); default pitch -> the whole night-5
+# pathology reproduces (ias +9 over command, phugoid, saturated bank).
+# The L1 "capture mystery" was the pitch loop all along: TECS couldn't
+# place pitch, energy control fell into a phugoid, L1 never got its
+# geometry.
+PTCH_RATE_FF     1.6387
+PTCH_RATE_P      8.3447
+PTCH_RATE_I      6.2585
+PTCH_RATE_D      0.4981
+PTCH2SRV_TCONST  0.75
+PTCH_RATE_FLTT   2.1221
+
+# --- night-6: TAKEOFF-mode no-rotation was the controllers intermittently
+# flying DCM's attitude, corrupted by the (realistic) gyro bias walk while
+# EKF3 tracked fine. Fixed-wing DCM fallback off:
+AHRS_OPTIONS     1
+
+# --- TAKEOFF-mode departure (replaces the scripted FBWA climb)
+TKOFF_ROTATE_SPD 26
+TKOFF_ALT        150
+TKOFF_LVL_ALT    30
+TKOFF_DIST       800
+TKOFF_LVL_PITCH  12
+TKOFF_THR_MAX    100
+# MUST be 0 for a wheeled standing start: nonzero suppresses throttle
+# until GPS speed exceeds it (hand-launch feature) = deadlock
+TKOFF_THR_MINSPD 0
 
 # --- loiter leg definitions (owner): standard = 3 deg/s at
 # (cruise+stall)/2 = 29 m/s -> R 553 m (bank 8.8); fast = 6 deg/s at

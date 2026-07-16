@@ -36,5 +36,19 @@ if __name__ == '__main__':
         p = struct.pack('>hhh', int(float(sys.argv[2])*100), int(float(sys.argv[3])*100), 0) + bytes([int(sys.argv[4]) if len(sys.argv)>4 else 0, int(sys.argv[5]) if len(sys.argv)>5 else 0])
         harness_cmd(0x46, p, seq=3)
         print("wind sent")
+    elif cmd == 'cal':
+        # PWM_CAL deflections for an ArduPilot DUT. The harness default cal
+        # (controls.c) is all-positive: pwm HIGH = positive deflection, which
+        # per fdm.c convention (Cmde < 0) is NOSE-DOWN elevator. ArduPilot
+        # outputs ch2 HIGH for nose-UP, so the elevator wants a NEGATIVE full
+        # deflection. This cal lives in harness RAM ONLY — resend after EVERY
+        # harness reboot (incl. uhubctl power cycles hitting shared hub
+        # ports), or the DUT flies with an inverted elevator: no rotation on
+        # takeoff, elevator railed, ground-roll overspeed.
+        import struct
+        for chan, cdeg in ((0, 2000), (1, -2500), (3, 2500)):  # ail, ELE FLIPPED, rud
+            harness_cmd(0x45, bytes([chan, 1]) + struct.pack('>h', cdeg) + bytes(4), seq=4+chan)
+            time.sleep(0.1)
+        for l in console_tail(2.5)[-2:]: print(l)
     elif cmd == 'tail':
         for l in console_tail(float(sys.argv[2])): print(l)

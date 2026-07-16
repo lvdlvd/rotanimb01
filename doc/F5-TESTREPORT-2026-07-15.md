@@ -167,11 +167,20 @@ itself in circles at idle; the ground model grew toe brakes below 15%
 power. Post-crash the DUT's estimator can latch an inverted attitude
 that never re-converges on static data (suspected railed gyro-bias
 state); the bench driver's cure is an automatic DUT reboot, exercised
-four times unattended in the final run. AUTOTUNE was flown (200 s of
-scripted doublets) but did not modify gains — its engagement
-conditions are a next-session study; rate-loop tuning for the 70-deg
-bank overshoots remains open (attitude TCONST experiments made things
-worse and were reverted). Takeoff reliability with noise: 1-in-4 with
+four times unattended in the final run. AUTOTUNE initially appeared
+inert; reading AP_AutoTune.cpp explained it: learning is event-based
+(needs filtered rate demand > ~30 deg/s AND attitude error > 12 deg,
+per-event FF fit, 4-event median, then D- and P-raise ladders to
+provoked oscillation), our 4-s stick HOLDS produced almost no events,
+and stop() RESTORES all gains on mode exit unless both D and P limits
+were established. Re-flown with proper bank-crossing reversals and
+in-mode gain readback: roll learned FF 3.00 / P 4.84 / D 0.38 (9x the
+default FF — the airframe's 53 deg/s full-aileron authority), pitch
+reached FF 1.62 / P 1.57 / D 0.17 before running out of sky
+(candidates in f5-bench.parm). With them the mission still completes;
+residual 60-75 deg loiter excursions now look demand-side (L1 + gust
+response) rather than tracking error — demand-vs-achieved logging is
+the next instrumentation step. Takeoff reliability with noise: 1-in-4 with
 the current crude scripted speed-hold climb — driver polish, not
 physics. The `stray` counter read zero through every run: the old
 "stray trickle" backlog item is closed by the permanently-selected

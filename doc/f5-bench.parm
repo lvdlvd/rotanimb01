@@ -61,3 +61,15 @@ NAVL1_PERIOD     22
 ROLL_LIMIT_DEG   40
 PTCH_LIM_MAX_DEG 20
 PTCH_LIM_MIN_DEG -18
+
+# --- AUTOTUNE-learned rate gains (night 4, candidate — roll tune ran 240 s
+# of reversals, pitch tune interrupted mid-ladder). This airframe wants ~9x
+# the default FF: low control authority (53 deg/s full aileron). NOTE:
+# AP_AutoTune RESTORES gains on mode exit unless both D and P limits were
+# found — read gains while still in the mode (tools/bench/autotune2.py).
+RLL_RATE_FF      3.0047
+RLL_RATE_P       4.8389
+RLL_RATE_D       0.3832
+PTCH_RATE_FF     1.6222
+PTCH_RATE_P      1.5732
+PTCH_RATE_D      0.1743

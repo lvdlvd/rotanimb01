@@ -19,10 +19,10 @@ const (
 )
 
 const (
-	canMode    = 0x43
+	canMode     = 0x43
 	canAirstart = 0x44
-	canPWMCal  = 0x45
-	canWind    = 0x46
+	canPWMCal   = 0x45
+	canWind     = 0x46
 )
 
 // id29: LCC 6 (TMC) | msgid | PRV | srcid 0xb0 | 0x9 | seq

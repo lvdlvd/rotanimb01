@@ -210,13 +210,13 @@ func circleFit(lat, lon []float64) (r, rsd float64) {
 // ---- loiter legs -----------------------------------------------------------
 
 type row struct {
-	simMs                        uint32
-	ias, alt, roll, navRoll      float64
-	pitch, navPitch              float64
-	thr                          int
-	lat, lon                     float64
-	wall                         float64
-	servo1, servo2               uint16
+	simMs                   uint32
+	ias, alt, roll, navRoll float64
+	pitch, navPitch         float64
+	thr                     int
+	lat, lon                float64
+	wall                    float64
+	servo1, servo2          uint16
 }
 
 func writeCSV(fn string, rows []row) error {

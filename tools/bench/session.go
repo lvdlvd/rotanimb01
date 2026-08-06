@@ -15,41 +15,41 @@ const (
 	gcsSys  = 255
 	gcsComp = 190
 
-	ModeManual  = 0
-	ModeFBWA    = 5
+	ModeManual   = 0
+	ModeFBWA     = 5
 	ModeAutotune = 8
-	ModeLoiter  = 12
-	ModeTakeoff = 13
+	ModeLoiter   = 12
+	ModeTakeoff  = 13
 
-	cmdArmDisarm         = 400
-	cmdRebootShutdown    = 246
+	cmdArmDisarm          = 400
+	cmdRebootShutdown     = 246
 	cmdSetMessageInterval = 511
 )
 
 // State is the continuously-pumped picture of the aircraft.
 type State struct {
-	SimMs   uint32 // max time_boot_ms seen: sim time on SITL, boot time on bench
-	Alt, IAS, Climb float64
-	Throttle int
-	Roll, Pitch, Yaw float64 // deg
+	SimMs             uint32 // max time_boot_ms seen: sim time on SITL, boot time on bench
+	Alt, IAS, Climb   float64
+	Throttle          int
+	Roll, Pitch, Yaw  float64 // deg
 	NavRoll, NavPitch float64
-	Lat, Lon float64
-	GPSFix   int
-	GPSVel, GPSCog float64
-	Vx, Vy   float64
-	Servo    [8]uint16
-	Armed    bool
-	Mode     uint32
-	HaveHB   bool
+	Lat, Lon          float64
+	GPSFix            int
+	GPSVel, GPSCog    float64
+	Vx, Vy            float64
+	Servo             [8]uint16
+	Armed             bool
+	Mode              uint32
+	HaveHB            bool
 }
 
 type Session struct {
-	conn   net.Conn
-	parser Parser
-	seq    byte
-	target byte // target system id
-	St     State
-	Debug  bool
+	conn      net.Conn
+	parser    Parser
+	seq       byte
+	target    byte // target system id
+	St        State
+	Debug     bool
 	QuietText bool
 	// textHook, when set, sees every STATUSTEXT after printing.
 	textHook func(string)

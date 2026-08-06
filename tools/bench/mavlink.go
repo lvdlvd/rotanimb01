@@ -234,7 +234,7 @@ func payRCOverride(sys, comp byte, ch [8]uint16) []byte {
 // ---- messages we receive ---------------------------------------------------
 
 type Heartbeat struct {
-	CustomMode uint32
+	CustomMode                        uint32
 	Type, Autopilot, BaseMode, Status byte
 }
 
@@ -245,9 +245,9 @@ func decHeartbeat(f *Frame) Heartbeat {
 }
 
 type ParamValue struct {
-	Value float32
+	Value        float32
 	Count, Index uint16
-	ID    string
+	ID           string
 }
 
 func decParamValue(f *Frame) ParamValue {
@@ -256,10 +256,10 @@ func decParamValue(f *Frame) ParamValue {
 }
 
 type GPSRawInt struct {
-	TimeUsec  uint64
-	Lat, Lon, Alt int32
+	TimeUsec           uint64
+	Lat, Lon, Alt      int32
 	Eph, Epv, Vel, Cog uint16
-	FixType, Sats byte
+	FixType, Sats      byte
 }
 
 func decGPSRawInt(f *Frame) GPSRawInt {
@@ -270,7 +270,7 @@ func decGPSRawInt(f *Frame) GPSRawInt {
 }
 
 type Attitude struct {
-	TimeBootMs uint32
+	TimeBootMs                                        uint32
 	Roll, Pitch, Yaw, RollSpeed, PitchSpeed, YawSpeed float32
 }
 
@@ -281,10 +281,10 @@ func decAttitude(f *Frame) Attitude {
 }
 
 type GlobalPositionInt struct {
-	TimeBootMs uint32
+	TimeBootMs                 uint32
 	Lat, Lon, Alt, RelativeAlt int32
-	Vx, Vy, Vz int16
-	Hdg        uint16
+	Vx, Vy, Vz                 int16
+	Hdg                        uint16
 }
 
 func decGlobalPositionInt(f *Frame) GlobalPositionInt {
@@ -311,8 +311,8 @@ func decServoOutputRaw(f *Frame) ServoOutputRaw {
 
 type NavControllerOutput struct {
 	NavRoll, NavPitch, AltError, AspdError, XtrackError float32
-	NavBearing, TargetBearing int16
-	WpDist uint16
+	NavBearing, TargetBearing                           int16
+	WpDist                                              uint16
 }
 
 func decNavControllerOutput(f *Frame) NavControllerOutput {
@@ -324,8 +324,8 @@ func decNavControllerOutput(f *Frame) NavControllerOutput {
 
 type VFRHUD struct {
 	Airspeed, Groundspeed, Alt, Climb float32
-	Heading  int16
-	Throttle uint16
+	Heading                           int16
+	Throttle                          uint16
 }
 
 func decVFRHUD(f *Frame) VFRHUD {

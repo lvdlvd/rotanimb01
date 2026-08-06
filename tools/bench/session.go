@@ -18,6 +18,7 @@ const (
 	ModeManual   = 0
 	ModeFBWA     = 5
 	ModeAutotune = 8
+	ModeRTL      = 11
 	ModeLoiter   = 12
 	ModeTakeoff  = 13
 

@@ -2,6 +2,7 @@
 // the SITL rig (fdm/sitljson + arduplane --model JSON) and the real bench
 // (serbridge on the pi). See README.md for session procedures.
 //
+//	bench mode      [-c addr] manual|fbwa|autotune|rtl|loiter|takeoff
 //	bench param     [-c addr] NAME [VALUE]        (get, or set then read back)
 //	bench params    [-c addr] -profile bench|sitl [-reboot]
 //	bench fly       [-c addr] [-alt 150]
@@ -43,7 +44,7 @@ func dial(addr string) *Session {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: bench <param|params|fly|loiter|probe|tune|disarm|reboot|drive|serbridge> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: bench <mode|param|params|fly|loiter|probe|tune|disarm|reboot|drive|serbridge> [flags]")
 		os.Exit(2)
 	}
 	cmd, args := os.Args[1], os.Args[2:]
@@ -101,6 +102,21 @@ func main() {
 		if got, err = s.GetParam(rest[0]); err == nil {
 			fmt.Printf("%s = %g\n", rest[0], got)
 		}
+
+	case "mode":
+		fs.Parse(args)
+		rest := fs.Args()
+		modes := map[string]uint32{"manual": ModeManual, "fbwa": ModeFBWA,
+			"autotune": ModeAutotune, "rtl": ModeRTL, "loiter": ModeLoiter,
+			"takeoff": ModeTakeoff}
+		if len(rest) < 1 || modes[rest[0]] == 0 && rest[0] != "manual" {
+			fmt.Fprintln(os.Stderr, "usage: bench mode manual|fbwa|autotune|rtl|loiter|takeoff")
+			os.Exit(2)
+		}
+		s := dial(*addr)
+		s.SetMode(modes[rest[0]])
+		s.Pump(time.Second)
+		fmt.Printf("mode set: %s (now %d)\n", rest[0], s.St.Mode)
 
 	case "disarm":
 		fs.Parse(args)

@@ -2,6 +2,7 @@
 // the SITL rig (fdm/sitljson + arduplane --model JSON) and the real bench
 // (serbridge on the pi). See README.md for session procedures.
 //
+//	bench arm       [-c addr]
 //	bench mode      [-c addr] manual|fbwa|autotune|rtl|loiter|takeoff
 //	bench param     [-c addr] NAME [VALUE]        (get, or set then read back)
 //	bench params    [-c addr] -profile bench|sitl [-reboot]
@@ -44,7 +45,7 @@ func dial(addr string) *Session {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: bench <mode|param|params|fly|loiter|probe|tune|disarm|reboot|drive|serbridge> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: bench <arm|mode|param|params|fly|loiter|probe|tune|disarm|reboot|drive|serbridge> [flags]")
 		os.Exit(2)
 	}
 	cmd, args := os.Args[1], os.Args[2:]
@@ -117,6 +118,13 @@ func main() {
 		s.SetMode(modes[rest[0]])
 		s.Pump(time.Second)
 		fmt.Printf("mode set: %s (now %d)\n", rest[0], s.St.Mode)
+
+	case "arm":
+		fs.Parse(args)
+		s := dial(*addr)
+		if err = s.Arm(40); err == nil {
+			fmt.Println("armed")
+		}
 
 	case "disarm":
 		fs.Parse(args)

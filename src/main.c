@@ -224,11 +224,13 @@ static uint32_t gps_head;
 static uint8_t gps_enable = 1, gps_lag_10ms = 15;
 static uint8_t gps_tid_fix, gps_tid_air, gps_tid_ns;
 
-// feeder origin: 52.0 N, 5.1 E. Integer microdegree math — float32 cannot
-// carry 1e-8 deg at these magnitudes. 1 cm north = 8.9831e-4 deg * 1e8 / 1e4;
-// east scaled by 1/cos(52 deg) = 1/0.61566.
-static const int64_t gps_lat0_1e8 = 5200000000LL, gps_lon0_1e8 = 510000000LL;
-static const int64_t gps_ncm_num = 89831, gps_ecm_num = 145910, gps_cm_den = 10000;
+// feeder origin: 45.52688 N, 1.667291 E — the vnav map region (golden frame
+// f15), so the bench flies over the terrain the camera's map tiles cover.
+// Integer microdegree math — float32 cannot carry 1e-8 deg at these
+// magnitudes. 1 cm north = 8.9831e-4 deg * 1e8 / 1e4; east scaled by
+// 1/cos(45.52688 deg) = 1/0.70057.
+static const int64_t gps_lat0_1e8 = 4552688000LL, gps_lon0_1e8 = 166729100LL;
+static const int64_t gps_ncm_num = 89831, gps_ecm_num = 128225, gps_cm_den = 10000;
 
 static void gps_feed(uint32_t now) {
 	uint32_t lag_us = (uint32_t)gps_lag_10ms * 10000u;

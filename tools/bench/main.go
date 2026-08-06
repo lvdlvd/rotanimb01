@@ -2,6 +2,7 @@
 // the SITL rig (fdm/sitljson + arduplane --model JSON) and the real bench
 // (serbridge on the pi). See README.md for session procedures.
 //
+//	bench param     [-c addr] NAME [VALUE]        (get, or set then read back)
 //	bench params    [-c addr] -profile bench|sitl [-reboot]
 //	bench fly       [-c addr] [-alt 150]
 //	bench loiter    [-c addr] [-tag run] [-takeoff] [-dur 5m]
@@ -21,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -41,7 +43,7 @@ func dial(addr string) *Session {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: bench <params|fly|loiter|probe|tune|disarm|reboot|drive|serbridge> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: bench <param|params|fly|loiter|probe|tune|disarm|reboot|drive|serbridge> [flags]")
 		os.Exit(2)
 	}
 	cmd, args := os.Args[1], os.Args[2:]
@@ -77,6 +79,28 @@ func main() {
 		rev := fs.Int("rev", 200, "max elevator reversals")
 		fs.Parse(args)
 		err = cmdTune(dial(*addr), *rev)
+
+	case "param":
+		fs.Parse(args)
+		rest := fs.Args()
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: bench param NAME [VALUE]")
+			os.Exit(2)
+		}
+		s := dial(*addr)
+		if len(rest) >= 2 {
+			var v float64
+			if v, err = strconv.ParseFloat(rest[1], 64); err != nil {
+				break
+			}
+			if err = s.SetParam(rest[0], v); err != nil {
+				break
+			}
+		}
+		var got float32
+		if got, err = s.GetParam(rest[0]); err == nil {
+			fmt.Printf("%s = %g\n", rest[0], got)
+		}
 
 	case "disarm":
 		fs.Parse(args)

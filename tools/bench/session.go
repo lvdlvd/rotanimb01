@@ -183,11 +183,13 @@ func (s *Session) SetMode(mode uint32) {
 	s.send(MsgSetMode, paySetMode(s.target, mode))
 }
 
-// GetParam reads one parameter with retries.
+// GetParam reads one parameter with retries. The horizon (6 x 3 s) rides
+// out the multi-second wifi outages the bench link actually has — 4 x 2 s
+// fit entirely inside one and aborted two campaigns on 2026-08-06.
 func (s *Session) GetParam(name string) (float32, error) {
-	for try := 0; try < 4; try++ {
+	for try := 0; try < 6; try++ {
 		s.send(MsgParamRequestRead, payParamRequestRead(s.target, 1, name))
-		if v, ok := s.waitParam(name, 2*time.Second); ok {
+		if v, ok := s.waitParam(name, 3*time.Second); ok {
 			return v, nil
 		}
 	}
@@ -198,9 +200,9 @@ func (s *Session) GetParam(name string) (float32, error) {
 // match the id). ArduPilot persists MAVLink param writes to storage.
 func (s *Session) SetParam(name string, v float64) error {
 	tol := math.Max(1e-3, math.Abs(v)*1e-3)
-	for try := 0; try < 4; try++ {
+	for try := 0; try < 6; try++ {
 		s.send(MsgParamSet, payParamSet(s.target, 1, name, float32(v)))
-		if got, ok := s.waitParam(name, 2*time.Second); ok &&
+		if got, ok := s.waitParam(name, 3*time.Second); ok &&
 			math.Abs(float64(got)-v) < tol {
 			return nil
 		}

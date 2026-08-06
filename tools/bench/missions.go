@@ -67,7 +67,16 @@ func cmdParams(s *Session, profile string, reboot bool) error {
 		return fmt.Errorf("profile %q: want bench or sitl", profile)
 	}
 	fmt.Printf("staging %d params (%s)\n", len(set), profile)
+	// One flaky-wifi outage must not abort the campaign: collect failures
+	// and give the stragglers a second full pass before giving up.
+	var failed [][2]interface{}
 	for _, p := range set {
+		if err := s.SetParam(p[0].(string), p[1].(float64)); err != nil {
+			fmt.Printf("  %v — will retry\n", err)
+			failed = append(failed, p)
+		}
+	}
+	for _, p := range failed {
 		if err := s.SetParam(p[0].(string), p[1].(float64)); err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ const (
 const (
 	canMode     = 0x43
 	canAirstart = 0x44
+	canParam    = 0x47
 	canPWMCal   = 0x45
 	canWind     = 0x46
 )
@@ -135,6 +137,34 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 			return err
 		}
 		fmt.Println("wind sent")
+		return nil
+
+	case "engine":
+		// preset the FDM engine params (power_w 41, t_static_n 42,
+		// crit_alt_m 43). 912iS = the owner's actual engine (default);
+		// 915iS = turbo, rated to FL150 — the high-altitude bench choice.
+		if len(args) < 1 {
+			return fmt.Errorf("drive engine <912|915>")
+		}
+		var vals [3]float64
+		switch args[0] {
+		case "912":
+			vals = [3]float64{74600, 1601, 0}
+		case "915":
+			vals = [3]float64{105000, 2000, 4572}
+		default:
+			return fmt.Errorf("unknown engine %q (912|915)", args[0])
+		}
+		for i, v := range vals {
+			p := make([]byte, 8)
+			binary.BigEndian.PutUint16(p[0:], uint16(41+i))
+			binary.BigEndian.PutUint32(p[2:], math.Float32bits(float32(v)))
+			if err := harnessCmd(dev, canParam, uint32(8+i), p); err != nil {
+				return err
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		fmt.Printf("engine %s set\n", args[0])
 		return nil
 
 	case "cal":

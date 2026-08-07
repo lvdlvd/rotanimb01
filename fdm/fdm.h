@@ -27,6 +27,12 @@ struct FdmParams {
 	float gust_sigma, gust_tau; // 34..35 per-axis Gauss-Markov, m/s and s (0 = off)
 	float mag_n[3];             // 36..38 earth field NED, uT
 	float qnh_pa, t0_k;         // 39..40 ISA anchors
+	float power_w, t_static_n;  // 41..42 engine: rated power W, static thrust cap N
+	float crit_alt_m;           // 43 turbo critical altitude, m: full power held to
+	                            //    here, lapsing with rho above; 0 = naturally
+	                            //    aspirated (lapses from sea level).
+	                            //    912iS: 74600, 1601, 0
+	                            //    915iS: 105000, 2000, 4572 (141 hp, FL150)
 };
 #define FDM_NPARAMS (sizeof(struct FdmParams) / sizeof(float))
 

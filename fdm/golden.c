@@ -239,6 +239,33 @@ static void test_observables(void) {
 	printf("climb at Vy: %.1f m/s (accept 2.5..8)\n", (double)roc);
 	CHECK(roc > 2.5f && roc < 8.0f, "roc %g", (double)roc);
 
+	// engine config: the honest 912iS lapses with density from sea level;
+	// the 915iS holds rated power to its critical altitude. At 4500 m the
+	// difference is the whole point: the NA engine can barely climb, the
+	// turbo still can.
+	{
+		struct FdmControls ce;
+		fdm_defaults(&f);
+		if (fdm_trim(&f, 4500.0f, 30.0f, 0.0f, &ce) == 0) {
+			ce.dt = 1.0f;
+			run(&ce, 15.0f);
+		}
+		float roc912 = -f.truth.v_ned[2];
+		fdm_defaults(&f);
+		f.p.power_w = 105000.0f;  // 915iS: 141 hp
+		f.p.t_static_n = 2000.0f;
+		f.p.crit_alt_m = 4572.0f; // FL150
+		CHECK(fdm_trim(&f, 4500.0f, 30.0f, 0.0f, &ce) == 0, "915 trim 4500");
+		ce.dt = 1.0f;
+		run(&ce, 15.0f);
+		float roc915 = -f.truth.v_ned[2];
+		printf("engine at 4500 m full throttle: 912iS %.1f m/s, 915iS %.1f m/s\n",
+		       (double)roc912, (double)roc915);
+		CHECK(roc915 > roc912 + 1.5f, "turbo margin %g vs %g",
+		      (double)roc915, (double)roc912);
+		CHECK(roc915 > 1.0f, "915 can climb at 4500 m: %g", (double)roc915);
+	}
+
 	// trim elevator vs speed: more nose-down (de decreasing) as speed rises
 	struct FdmControls c25, c45;
 	fdm_defaults(&f);

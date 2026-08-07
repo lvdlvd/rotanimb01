@@ -182,8 +182,13 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt) {
 	// theory static limit; torque reaction about x
 	float eta = 0.50f + 0.35f * (va > 40.0f ? 1.0f : va * (1.0f / 40.0f));
 	float vden = va > 1.0f ? va : 1.0f;
-	float T = eta * c->dt * 74600.0f / vden;
-	float Tcap = 1601.0f * c->dt; // static momentum limit, ~linear in power lever
+	// density lapse: naturally aspirated engines lapse from sea level
+	// (crit_alt 0); a turbo holds rated power to crit_alt and lapses above
+	float rho_crit, ps_, tk_;
+	isa_eval(p->crit_alt_m, &ps_, &rho_crit, &tk_);
+	float lapse = rho < rho_crit ? rho / rho_crit : 1.0f;
+	float T = eta * c->dt * p->power_w * lapse / vden;
+	float Tcap = p->t_static_n * lapse * c->dt; // static momentum limit, ~linear in power lever
 	if (T > Tcap) T = Tcap;
 	if (T < 0.0f) T = 0.0f; // no windmilling drag model
 	float kmdt = p->km * c->dt;
@@ -344,6 +349,8 @@ void fdm_defaults(struct Fdm *f) {
 	p->Cnb = 0.07f; p->Cnp = -0.03f; p->Cnr = -0.10f; p->Cnda = -0.01f; p->Cndr = -0.08f;
 	// prop anchors: static thrust 1600 N, 890 N at 46 m/s and 75% throttle
 	p->km = 582.0f; p->CpSp = 0.00772f; p->kQ = 3.0e-4f;
+	// engine: the owner's actual Rotax 912iS (100 hp, naturally aspirated)
+	p->power_w = 74600.0f; p->t_static_n = 1601.0f; p->crit_alt_m = 0.0f;
 	p->mag_n[0] = 19.97f; p->mag_n[2] = 44.01f; // the bench-cal field
 	p->qnh_pa = 101325.0f; p->t0_k = 288.15f;
 	f->quat[0] = 1.0f;

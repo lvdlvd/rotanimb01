@@ -34,6 +34,8 @@
 #include "clock.h"
 #include "exti.h"
 #include "console.h" // pulls serial.h + tprintf.h
+#include "dma_g4.h"  // G4 DMAMUX requests (n-array family split, 34bfac9)
+#include "usart_v3.h" // usart_init for FIFO-family USARTs (same split)
 #include "fault.h"
 #include "fdcan.h"
 #include "gpio.h"

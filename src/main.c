@@ -712,11 +712,14 @@ void Reset_Handler(void) {
 			}
 		}
 
-		if (gps_enable && fdm_mode && (int32_t)(now - t_gpsfeed) >= 200000) { // DroneCAN 5 Hz
+		// unsigned deltas: with (int32_t), a timer first armed after ~35.8 min
+		// of uptime saw now - 0 wrap negative and never fired — fdm enabled
+		// late produced no TRUTH_* and no GPS feed (found 2026-08-07)
+		if (gps_enable && fdm_mode && now - t_gpsfeed >= 200000) { // DroneCAN 5 Hz
 			t_gpsfeed = now;
 			gps_feed(now);
 		}
-		if (gps_enable && (int32_t)(now - t_nodest) >= 1000000) { // NodeStatus 1 Hz
+		if (gps_enable && now - t_nodest >= 1000000) { // NodeStatus 1 Hz
 			t_nodest = now;
 			uint8_t buf[8];
 			struct DroneCanFrame fr[2];
@@ -726,7 +729,7 @@ void Reset_Handler(void) {
 			gps_enqueue(fr, n);
 		}
 
-		if (fdm_mode && (int32_t)(now - t_truth) >= 50000) { // TRUTH_* 20 Hz
+		if (fdm_mode && now - t_truth >= 50000) { // TRUTH_* 20 Hz
 			t_truth = now;
 			const struct FdmTruth *ft = &fdm.truth;
 			uint8_t p[8];

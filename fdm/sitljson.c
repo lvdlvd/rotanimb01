@@ -17,6 +17,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 
@@ -44,7 +45,16 @@ static float lag(float y, float u, float dt, float tau, float rate) {
 	return y + d;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+	// optional truth tap: every JSON reply is mirrored (decimated to ~10 Hz)
+	// to UDP localhost:<port>, so a nav driver reads the same truth the
+	// autopilot's sensors are derived from. Usage: sitljson [truth_port]
+	int truth_port = argc > 1 ? atoi(argv[1]) : 0;
+	struct sockaddr_in taddr = {0};
+	taddr.sin_family = AF_INET;
+	taddr.sin_addr.s_addr = htonl(0x7f000001);
+	taddr.sin_port = htons((uint16_t)truth_port);
+
 	int s = socket(AF_INET, SOCK_DGRAM, 0);
 	struct sockaddr_in addr = {0};
 	addr.sin_family = AF_INET;
@@ -56,7 +66,8 @@ int main(void) {
 	}
 	fdm_defaults(&fdm);
 	uint32_t last_frame = 0;
-	printf("sitljson: kitfox fdm on :9002, parked on the gear\n");
+	printf("sitljson: kitfox fdm on :9002%s, parked on the gear\n",
+		truth_port ? " (+truth tap)" : "");
 
 	for (;;) {
 		uint8_t buf[80];
@@ -132,5 +143,10 @@ int main(void) {
 			(double)t->quat[0], (double)t->quat[1], (double)t->quat[2], (double)t->quat[3],
 			(double)t->va);
 		sendto(s, out, (size_t)m, 0, (struct sockaddr *)&from, flen);
+		static int tdiv;
+		if (truth_port && ++tdiv >= 5) { // ~10 Hz at the 50 Hz frame rate
+			tdiv = 0;
+			sendto(s, out, (size_t)m, 0, (struct sockaddr *)&taddr, sizeof taddr);
+		}
 	}
 }

@@ -107,7 +107,7 @@ func main() {
 	case "mode":
 		fs.Parse(args)
 		rest := fs.Args()
-		modes := map[string]uint32{"manual": ModeManual, "fbwa": ModeFBWA,
+		modes := map[string]uint32{"manual": ModeManual, "fbwa": ModeFBWA, "hdgalt": ModeHdgAlt,
 			"autotune": ModeAutotune, "rtl": ModeRTL, "loiter": ModeLoiter,
 			"takeoff": ModeTakeoff}
 		if len(rest) < 1 || modes[rest[0]] == 0 && rest[0] != "manual" {

@@ -21,6 +21,7 @@ const (
 	ModeRTL      = 11
 	ModeLoiter   = 12
 	ModeTakeoff  = 13
+	ModeHdgAlt   = 27 // hdgalt_dev.xml PLANE_MODE_HDGALT
 
 	cmdArmDisarm          = 400
 	cmdRebootShutdown     = 246

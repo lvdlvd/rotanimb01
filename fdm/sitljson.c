@@ -182,7 +182,10 @@ int main(int argc, char **argv) {
 			(double)t->pos_cm[0] * 0.01, (double)t->pos_cm[1] * 0.01, (double)t->pos_cm[2] * 0.01,
 			(double)t->v_ned[0], (double)t->v_ned[1], (double)t->v_ned[2],
 			(double)t->quat[0], (double)t->quat[1], (double)t->quat[2], (double)t->quat[3],
-			(double)t->va);
+			// SIM_JSON's "airspeed" is EAS (it feeds the pitot model
+			// directly); va is TAS — send sea-level-density EAS, the
+			// same conversion the harness uses for TRUTH_AIR ias
+			(double)sqrtf(2.0f * t->qbar / 1.225f));
 		sendto(s, out, (size_t)m, 0, (struct sockaddr *)&from, flen);
 		static int tdiv;
 		if (truth_port && ++tdiv >= 5) { // ~10 Hz at the 50 Hz frame rate

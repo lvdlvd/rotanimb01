@@ -16,7 +16,7 @@ import (
 // the pi's stable by-id paths
 const (
 	defHarnCmd = "/dev/serial/by-id/usb-rotanimb01_hitl-harness_2038334D46325004004F0038-if00"
-	defHarnCon = "/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_0668FF545589564867022446-if02"
+	defHarnCon = "/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_066DFF535550755187243416-if02"
 )
 
 const (

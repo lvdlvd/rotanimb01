@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 
 static struct Fdm fdm;
 static struct FdmControls tgt, act; // demanded (from pwm) and lagged (to fdm)
@@ -64,6 +65,18 @@ int main(int argc, char **argv) {
 		perror("bind 9002");
 		return 1;
 	}
+
+	// control port: "airstart <alt_m> <ias_mps> [hdg_deg]" datagrams, same
+	// trim-and-reset semantics as the harness cmd_fdm_init handler
+	int cs = socket(AF_INET, SOCK_DGRAM, 0);
+	struct sockaddr_in caddr = {0};
+	caddr.sin_family = AF_INET;
+	caddr.sin_addr.s_addr = htonl(0x7f000001);
+	caddr.sin_port = htons(9003);
+	if (bind(cs, (struct sockaddr *)&caddr, sizeof caddr) != 0) {
+		perror("bind 9003");
+		return 1;
+	}
 	fdm_defaults(&fdm);
 	uint32_t last_frame = 0;
 	printf("sitljson: kitfox fdm on :9002%s, parked on the gear\n",
@@ -73,6 +86,34 @@ int main(int argc, char **argv) {
 		uint8_t buf[80];
 		struct sockaddr_in from;
 		socklen_t flen = sizeof from;
+
+		fd_set rfds;
+		FD_ZERO(&rfds);
+		FD_SET(s, &rfds);
+		FD_SET(cs, &rfds);
+		if (select((s > cs ? s : cs) + 1, &rfds, NULL, NULL, NULL) <= 0) continue;
+
+		if (FD_ISSET(cs, &rfds)) {
+			char cbuf[128];
+			ssize_t cn = recvfrom(cs, cbuf, sizeof cbuf - 1, 0, NULL, NULL);
+			if (cn > 0) {
+				cbuf[cn] = 0;
+				float a, v, hd = 0.0f;
+				if (sscanf(cbuf, "airstart %f %f %f", &a, &v, &hd) >= 2) {
+					struct FdmControls tc;
+					if (fdm_trim(&fdm, a, v, hd * ((float)M_PI / 180.0f), &tc) == 0) {
+						tgt = act = tc;
+						printf("sitljson: airstart alt %.0f ias %.1f hdg %.0f\n",
+							(double)a, (double)v, (double)hd);
+					} else {
+						printf("sitljson: airstart trim FAILED (alt %.0f ias %.1f)\n",
+							(double)a, (double)v);
+					}
+				}
+			}
+		}
+		if (!FD_ISSET(s, &rfds)) continue;
+
 		ssize_t n = recvfrom(s, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
 		if (n < 8) continue;
 		uint16_t magic = (uint16_t)(buf[0] | buf[1] << 8);

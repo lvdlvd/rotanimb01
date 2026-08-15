@@ -30,19 +30,20 @@ const (
 
 // State is the continuously-pumped picture of the aircraft.
 type State struct {
-	SimMs             uint32 // max time_boot_ms seen: sim time on SITL, boot time on bench
-	Alt, IAS, Climb   float64
-	Throttle          int
-	Roll, Pitch, Yaw  float64 // deg
-	NavRoll, NavPitch float64
-	Lat, Lon          float64
-	GPSFix            int
-	GPSVel, GPSCog    float64
-	Vx, Vy            float64
-	Servo             [8]uint16
-	Armed             bool
-	Mode              uint32
-	HaveHB            bool
+	SimMs               uint32 // max time_boot_ms seen: sim time on SITL, boot time on bench
+	Alt, IAS, Climb     float64
+	Throttle            int
+	Roll, Pitch, Yaw    float64 // deg
+	NavRoll, NavPitch   float64
+	AltError, AspdError float64
+	Lat, Lon            float64
+	GPSFix              int
+	GPSVel, GPSCog      float64
+	Vx, Vy              float64
+	Servo               [8]uint16
+	Armed               bool
+	Mode                uint32
+	HaveHB              bool
 }
 
 type Session struct {
@@ -146,6 +147,8 @@ func (s *Session) handle(f *Frame) {
 		n := decNavControllerOutput(f)
 		s.St.NavRoll = float64(n.NavRoll)
 		s.St.NavPitch = float64(n.NavPitch)
+		s.St.AltError = float64(n.AltError)
+		s.St.AspdError = float64(n.AspdError)
 	case MsgServoOutputRaw:
 		s.St.Servo = decServoOutputRaw(f).Servo
 	case MsgStatustext:
@@ -294,6 +297,27 @@ func (s *Session) Reboot() {
 
 // MsgInterval requests a stream rate. Bench lesson: raise rates only once
 // airborne — pre-takeoff floods starve the climb loop.
+// SendHdgAltCommand sends HDGALT_COMMAND (dev-fork msg 52100). flags:
+// 1 heading, 2 turn rate, 4 altitude, 8 climb rate.
+func (s *Session) SendHdgAltCommand(flags uint16, headingDeg, turnRateDps, altitudeM, climbRateMps float64) error {
+	p := make([]byte, 22)
+	le32 := func(off int, v uint32) {
+		p[off] = byte(v)
+		p[off+1] = byte(v >> 8)
+		p[off+2] = byte(v >> 16)
+		p[off+3] = byte(v >> 24)
+	}
+	lef := func(off int, v float64) { le32(off, math.Float32bits(float32(v))) }
+	le32(0, 0) // start_time_boot_ms: execute on receipt
+	lef(4, headingDeg)
+	lef(8, turnRateDps)
+	lef(12, altitudeM)
+	lef(16, climbRateMps)
+	p[20] = byte(flags)
+	p[21] = byte(flags >> 8)
+	return s.send(MsgHdgAltCommand, p)
+}
+
 func (s *Session) MsgInterval(msgid uint32, hz float32) {
 	s.Command(cmdSetMessageInterval, float32(msgid), 1e6/hz, 0, 0, 0, 0, 0)
 }

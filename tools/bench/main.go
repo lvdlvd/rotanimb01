@@ -119,6 +119,44 @@ func main() {
 		s.Pump(time.Second)
 		fmt.Printf("mode set: %s (now %d)\n", rest[0], s.St.Mode)
 
+	case "watch":
+		dur := fs.Duration("dur", 30*time.Second, "how long to watch")
+		fs.Parse(args)
+		s := dial(*addr)
+		s.QuietText = false
+		end := time.Now().Add(*dur)
+		for time.Now().Before(end) {
+			s.Pump(time.Second)
+			st := &s.St
+			fmt.Printf("mode %2d alt %6.0f clb %+5.1f ias %4.1f thr %3d%% pit %+5.1f/%+5.1f rll %+6.1f nav %+5.1f aerr %+7.1f serr %+5.1f\n",
+				st.Mode, st.Alt, st.Climb, st.IAS, st.Throttle, st.Pitch, st.NavPitch, st.Roll, st.NavRoll, st.AltError, st.AspdError)
+		}
+
+	case "hdgaltcmd":
+		hdg := fs.Float64("hdg", -1, "heading deg (unset: leave)")
+		trate := fs.Float64("trate", 0, "turn rate deg/s (0: leave)")
+		alt := fs.Float64("alt", -1, "altitude m MSL (unset: leave)")
+		crate := fs.Float64("crate", 0, "climb rate m/s (0: leave)")
+		fs.Parse(args)
+		var flags uint16
+		if *hdg >= 0 {
+			flags |= 1
+		}
+		if *trate != 0 {
+			flags |= 2
+		}
+		if *alt >= 0 {
+			flags |= 4
+		}
+		if *crate != 0 {
+			flags |= 8
+		}
+		s := dial(*addr)
+		if err = s.SendHdgAltCommand(flags, *hdg, *trate, *alt, *crate); err == nil {
+			s.Pump(time.Second)
+			fmt.Printf("hdgalt command sent (flags %#x)\n", flags)
+		}
+
 	case "arm":
 		fs.Parse(args)
 		s := dial(*addr)

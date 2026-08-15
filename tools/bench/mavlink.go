@@ -26,6 +26,7 @@ const (
 	MsgCommandLong         = 76
 	MsgCommandAck          = 77
 	MsgStatustext          = 253
+	MsgHdgAltCommand       = 52100
 )
 
 // crcExtra seeds the X.25 checksum per message; a wrong value here makes the
@@ -36,7 +37,7 @@ var crcExtra = map[uint32]byte{
 	MsgAttitude: 39, MsgGlobalPositionInt: 104, MsgServoOutputRaw: 222,
 	MsgNavControllerOutput: 183, MsgRCChannelsOverride: 124,
 	MsgVFRHUD: 20, MsgCommandLong: 152, MsgCommandAck: 143,
-	MsgStatustext: 83,
+	MsgStatustext: 83, MsgHdgAltCommand: 161,
 }
 
 func crcX25(crc uint16, b byte) uint16 {

@@ -318,14 +318,33 @@ func cmdFly(s *Session, alt float64) error {
 		return err
 	}
 	fmt.Printf("reached %.0f m — FBWA hands-off 60 s at cruise throttle\n", s.St.Alt)
+	// roll-vs-demand series: the wobble debug wants the oscillation period
+	// (rate-loop seconds vs L1's ~17 s) and whether demand leads or follows
+	s.MsgInterval(MsgAttitude, 10)
+	s.MsgInterval(MsgNavControllerOutput, 5)
+	s.MsgInterval(MsgServoOutputRaw, 5)
+	fn := fmt.Sprintf("fly-handsoff-%s.csv", time.Now().Format("0102-150405"))
+	cf, _ := os.Create(fn)
+	if cf != nil {
+		fmt.Fprintln(cf, "ms,roll,nav_roll,pitch,nav_pitch,servo1,servo2,ias,alt")
+	}
 	s.SetMode(ModeFBWA)
 	t0 := s.St.SimMs
 	worstRoll, worstPitch := 0.0, 0.0
 	for s.St.SimMs-t0 < 60000 {
 		s.RCOverride(1500, 1500, 1450, 1500) // FBWA throttle is manual: ~cruise
-		s.Pump(200 * time.Millisecond)
+		s.Pump(100 * time.Millisecond)
 		worstRoll = math.Max(worstRoll, math.Abs(s.St.Roll))
 		worstPitch = math.Max(worstPitch, math.Abs(s.St.Pitch))
+		if cf != nil {
+			fmt.Fprintf(cf, "%d,%.2f,%.2f,%.2f,%.2f,%d,%d,%.1f,%.1f\n",
+				s.St.SimMs-t0, s.St.Roll, s.St.NavRoll, s.St.Pitch, s.St.NavPitch,
+				s.St.Servo[0], s.St.Servo[1], s.St.IAS, s.St.Alt)
+		}
+	}
+	if cf != nil {
+		cf.Close()
+		fmt.Printf("series -> %s\n", fn)
 	}
 	fmt.Printf("hands-off: worst |roll| %.1f, worst |pitch| %.1f, ias %.1f alt %.1f\n",
 		worstRoll, worstPitch, s.St.IAS, s.St.Alt)

@@ -63,6 +63,7 @@ enum {
 	CANMSG_CMD_NOISE = 0x42,
 	CANMSG_FDM_MODE = 0x43,
 	CANMSG_FDM_INIT = 0x44,
+	CANMSG_FDM_POS  = 0x49, // i32 N cm, i32 E cm: teleport the FDM ground position (bench rehome)
 	CANMSG_PWM_CAL = 0x45,
 	CANMSG_WIND = 0x46,
 	CANMSG_PARAM_SET = 0x47,

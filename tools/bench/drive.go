@@ -22,6 +22,7 @@ const (
 const (
 	canMode     = 0x43
 	canAirstart = 0x44
+	canFDMPos   = 0x49
 	canParam    = 0x47
 	canPWMCal   = 0x45
 	canWind     = 0x46
@@ -104,14 +105,42 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 
 	case "airstart":
 		if len(args) < 2 {
-			return fmt.Errorf("drive airstart <alt_m> <speed_mps>")
+			return fmt.Errorf("drive airstart <alt_m> <speed_mps> [hdg_deg] [north_m east_m]")
 		}
 		alt, _ := strconv.Atoi(args[0])
 		spd, _ := strconv.ParseFloat(args[1], 64)
+		if len(args) >= 5 { // rehome first, then trim at the new spot
+			n, _ := strconv.ParseFloat(args[3], 64)
+			e, _ := strconv.ParseFloat(args[4], 64)
+			q := make([]byte, 8)
+			binary.BigEndian.PutUint32(q[0:], uint32(int32(n*100)))
+			binary.BigEndian.PutUint32(q[4:], uint32(int32(e*100)))
+			if err := harnessCmd(dev, canFDMPos, 7, q); err != nil {
+				return err
+			}
+		}
 		p := make([]byte, 8)
 		binary.BigEndian.PutUint16(p[0:], uint16(alt))
 		binary.BigEndian.PutUint16(p[2:], uint16(spd*10))
+		if len(args) >= 3 { // heading was silently dropped before 2026-08-28
+			hd, _ := strconv.ParseFloat(args[2], 64)
+			binary.BigEndian.PutUint16(p[4:], uint16(hd*100))
+		}
 		if err := harnessCmd(dev, canAirstart, 2, p); err != nil {
+			return err
+		}
+		return tailPrint(con, 2.5, 3)
+
+	case "setpos":
+		if len(args) < 2 {
+			return fmt.Errorf("drive setpos <north_m> <east_m>")
+		}
+		n, _ := strconv.ParseFloat(args[0], 64)
+		e, _ := strconv.ParseFloat(args[1], 64)
+		q := make([]byte, 8)
+		binary.BigEndian.PutUint32(q[0:], uint32(int32(n*100)))
+		binary.BigEndian.PutUint32(q[4:], uint32(int32(e*100)))
+		if err := harnessCmd(dev, canFDMPos, 7, q); err != nil {
 			return err
 		}
 		return tailPrint(con, 2.5, 3)

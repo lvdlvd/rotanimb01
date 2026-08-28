@@ -77,7 +77,7 @@ struct CmdBox {
 	volatile uint32_t rx_us; // now_us() at reception
 };
 static struct CmdBox cmd_state, cmd_env, cmd_noise, cmd_fdm_mode, cmd_fdm_init, cmd_pwm_cal,
-		cmd_wind, cmd_param, cmd_gps_cfg;
+		cmd_wind, cmd_param, cmd_gps_cfg, cmd_fdm_pos;
 
 static void cmd_store(struct CmdBox *b, const uint8_t *p, size_t len) {
 	for (size_t i = 0; i < len && i < 8; i++) {
@@ -147,6 +147,9 @@ static void host_msg(uint32_t id29, const uint8_t *p, size_t len) {
 		break;
 	case CANMSG_GPS_CFG:
 		cmd_store(&cmd_gps_cfg, p, len);
+		break;
+	case CANMSG_FDM_POS:
+		cmd_store(&cmd_fdm_pos, p, len);
 		break;
 	}
 }
@@ -441,6 +444,14 @@ static void cmd_decode(void) {
 			fdm_ctl = fdm_trim_ctl;
 			fdm_crashes = 0; // a successful air-start leaves the craters behind
 		}
+	}
+	static uint32_t seq_fpos;
+	if (cmd_snapshot(&cmd_fdm_pos, p, &seq_fpos)) {
+		// bench rehome: N/E teleport only — alt/attitude/energy stay; pair
+		// with FDM_INIT for a full air-start at the new position
+		fdm.pos_cm[0] = (int32_t)decode_be_uint32(p);
+		fdm.pos_cm[1] = (int32_t)decode_be_uint32(p + 4);
+		fdm.pos_rem[0] = fdm.pos_rem[1] = 0.0f;
 	}
 	static uint32_t seq_pcal;
 	if (cmd_snapshot(&cmd_pwm_cal, p, &seq_pcal)) {

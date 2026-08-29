@@ -100,13 +100,22 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("px4hil: waiting for PX4 SITL on %s (anchor %.5f,%.5f)", *listen, *lat0, *lon0)
-	conn, err := ln.Accept()
-	if err != nil {
-		log.Fatal(err)
+	// accept loop: one PX4 at a time; a disconnect (PX4 restart)
+	// re-parks the aircraft and waits for the next connection
+	for {
+		log.Printf("px4hil: waiting for PX4 SITL on %s (anchor %.5f,%.5f)", *listen, *lat0, *lon0)
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("px4hil: PX4 connected from %s", conn.RemoteAddr())
+		serve(conn, *lat0, *lon0, *speedup, truth)
+		conn.Close()
 	}
-	log.Printf("px4hil: PX4 connected from %s", conn.RemoteAddr())
+}
 
+// serve runs one PX4 session over conn until the link drops.
+func serve(conn net.Conn, lat0, lon0, speedup float64, truth net.Conn) {
 	f := NewFdm()
 	sh := &shared{}
 
@@ -172,14 +181,15 @@ func main() {
 			Temperature:  tr.TDegc,
 			FieldsUpdated: apm.HilSensorUpdatedFlags(0x1FFF),
 		}); err != nil {
-			log.Fatalf("px4hil: tx: %v", err)
+			log.Printf("px4hil: tx: %v — session over, re-parking", err)
+			return
 		}
 
 		if n%gpsEveryN == 0 {
 			// int 1e-7 deg math like the harness feeder (float32 can't):
 			// PosCm is cm; 1e-7 deg lat = 1.113195 cm
-			lat := int32(*lat0*1e7) + int32(float64(tr.PosCm[0])/1.113195)
-			lon := int32(*lon0*1e7) + int32(float64(tr.PosCm[1])/(1.113195*math.Cos(*lat0*math.Pi/180)))
+			lat := int32(lat0*1e7) + int32(float64(tr.PosCm[0])/1.113195)
+			lon := int32(lon0*1e7) + int32(float64(tr.PosCm[1])/(1.113195*math.Cos(lat0*math.Pi/180)))
 			vn, ve, vd := tr.VNed[0], tr.VNed[1], tr.VNed[2]
 			gs := math.Sqrt(float64(vn*vn + ve*ve))
 			cog := math.Atan2(float64(ve), float64(vn)) * 180 / math.Pi
@@ -215,8 +225,8 @@ func main() {
 		}
 		n++
 
-		if *speedup > 0 {
-			simWall := time.Duration(float64(simUsec) * 1000 / *speedup)
+		if speedup > 0 {
+			simWall := time.Duration(float64(simUsec) * 1000 / speedup)
 			if ahead := simWall - time.Since(wall0); ahead > time.Millisecond {
 				time.Sleep(ahead)
 			}

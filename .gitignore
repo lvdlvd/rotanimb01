@@ -19,3 +19,6 @@ __pycache__/
 /tools/bench/bench
 /tools/bench/bench-linux-arm64
 /tools/bench/*.csv
+
+# px4hil is a Go build product
+/tools/px4hil/px4hil

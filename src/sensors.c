@@ -22,10 +22,12 @@ enum { // BMI088 gyro
 	G_CHIP_ID = 0x00, G_RATE = 0x02, G_INT_STAT_1 = 0x0A, G_FIFO_STATUS = 0x0E,
 	G_RANGE = 0x0F, G_BANDWIDTH = 0x10, G_LPM1 = 0x11, G_RATE_HBW = 0x13,
 	G_SOFTRESET = 0x14, G_INT_CTRL = 0x15, G_IO_CONF = 0x16, G_IO_MAP = 0x18,
+	G_FIFO_WM_ENABLE = 0x1E,
 	G_SELF_TEST = 0x3C, G_FIFO_CONFIG0 = 0x3D, G_FIFO_CONFIG1 = 0x3E,
 	G_FIFO_DATA = 0x3F,
 };
 enum { // BMP390
+	B_TRIM_CRC = 0x30,
 	B_CHIP_ID = 0x00, B_REV_ID = 0x01, B_ERR_REG = 0x02, B_STATUS = 0x03,
 	B_PRESS = 0x04, B_TEMP = 0x07, B_SENSORTIME = 0x0C, B_EVENT = 0x10,
 	B_INT_STATUS = 0x11, B_INT_CTRL = 0x19, B_IF_CONF = 0x1A, B_PWR_CTRL = 0x1B,
@@ -46,8 +48,8 @@ static const uint8_t accel_wmask[SPIDEV_REGS / 8] = {
 	[0x6D / 8] = 0x20, [0x7C / 8] = 0x70,
 };
 static const uint8_t gyro_wmask[SPIDEV_REGS / 8] = {
-	// 0x0F | 0x10,0x11,0x13,0x14,0x15,0x16 | 0x18 | 0x3C,0x3D,0x3E
-	[0x0F / 8] = 0x80, [0x10 / 8] = 0x7B, [0x18 / 8] = 0x01, [0x3C / 8] = 0x70,
+	// 0x0F | 0x10,0x11,0x13,0x14,0x15,0x16 | 0x18 | 0x1E | 0x3C,0x3D,0x3E
+	[0x0F / 8] = 0x80, [0x10 / 8] = 0x7B, [0x18 / 8] = 0x41, [0x3C / 8] = 0x70,
 };
 static const uint8_t baro_wmask[SPIDEV_REGS / 8] = {
 	// 0x15..0x1A (FIFO wtm+cfg, INT_CTRL, IF_CONF) | 0x1B..0x1D | 0x1F | 0x7E
@@ -63,7 +65,8 @@ static const uint8_t mag_wmask[SPIDEV_REGS / 8] = {
 static volatile bool accel_reset_req, gyro_reset_req, baro_reset_req;
 static uint32_t gyro_drdy_set_us, accel_drdy_set_us, baro_drdy_set_us, mag_drdy_set_us;
 static volatile bool gyro_drdy_armed, accel_drdy_armed, baro_drdy_armed, mag_drdy_armed;
-static volatile bool mag_poll_pending; // single-shot POLL awaiting a sample
+static volatile bool mag_poll_pending;   // single-shot POLL awaiting a sample
+static volatile bool baro_forced_pending; // single-shot FORCED conversion awaiting a sample
 
 // ---- the BMI088 FIFOs (M4b, spec = the ArduPilot driver) --------------------
 // Served through the engine's streaming register; content stays flat at the
@@ -76,13 +79,26 @@ static volatile bool mag_poll_pending; // single-shot POLL awaiting a sample
 // frames; at full the FIFO_STATUS overrun bit is raised, which the driver
 // answers by rewriting FIFO_CONFIG1 — any write there clears the FIFO.
 
-static uint8_t accel_fifo[146 * 7]; // ~1 KB, like the part
+// The accel FIFO is entered EARLY: PX4's BMI088 driver reads FIFO_LENGTH_0
+// (0x24), FIFO_LENGTH_1 and the frames in ONE transaction, counting on the
+// real part's address increment to carry it into the 0x26 burst port;
+// ArduPilot's reads 0x24-0x25 and 0x26 separately. Both are served by
+// mirroring the two length bytes into the head of the stream buffer and
+// telling the engine the port may be entered two registers early
+// (stream_prefix, see n-array lib/spislave.h).
+#define A_FIFO_PREFIX 2
+static struct {
+	uint8_t len[A_FIFO_PREFIX]; // mirror of FIFO_LENGTH_0/1 at 0x24/0x25
+	uint8_t data[146 * 7];      // ~1 KB, like the part
+} accel_fifo;
+static_assert(sizeof accel_fifo == A_FIFO_PREFIX + 146 * 7, "no padding: the burst source must be linear");
 static uint16_t accel_fifo_fill;
 static uint8_t gyro_fifo[100 * 6]; // 100 frames, like the part
 static uint16_t gyro_fifo_fill;
 
-static void accel_fifo_sync(struct SPIDev *d) { // fill -> FIFO_LENGTH regs
+static void accel_fifo_sync(struct SPIDev *d) { // fill -> FIFO_LENGTH regs + their mirror
 	encode_le_uint16(&d->reg[A_FIFO_LEN0], accel_fifo_fill);
+	encode_le_uint16(accel_fifo.len, accel_fifo_fill);
 }
 
 static void gyro_fifo_sync(struct SPIDev *d) { // fill -> frame count, keep overrun
@@ -158,8 +174,11 @@ static void accel_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
 				(d->reg[A_INT1_IO_CTRL] & 0x02) ? digitalLo(DRDY_ACC) : digitalHi(DRDY_ACC);
 			}
 		}
-		if (addr == A_FIFO_DATA) { // FIFO drain (the engine's streaming register)
-			fifo_pop(accel_fifo, &accel_fifo_fill, len, 7);
+		// FIFO drain (the engine's streaming register). The burst may have
+		// been entered up to A_FIFO_PREFIX registers early, in which case
+		// those mirrored length bytes are part of len but not of the FIFO.
+		if (addr <= A_FIFO_DATA && A_FIFO_DATA - addr <= A_FIFO_PREFIX && addr + len > A_FIFO_DATA) {
+			fifo_pop(accel_fifo.data, &accel_fifo_fill, len - (A_FIFO_DATA - addr), 7);
 			accel_fifo_sync(d);
 		}
 		return;
@@ -214,6 +233,16 @@ static void baro_frame(struct SPIDev *d, uint8_t cmd, uint8_t addr, int len) {
 			}
 		}
 		return;
+	}
+	if (addr <= B_PWR_CTRL && addr + len > B_PWR_CTRL) {
+		// mode[5:4]: 00 sleep, 01 and 10 FORCED, 11 normal. A forced write runs
+		// exactly ONE conversion and the part drops back to sleep by itself;
+		// normal mode free-runs at ODR (baro_rate_hz). ArduPilot only ever uses
+		// normal mode, PX4's BMP388 driver only ever uses forced.
+		uint8_t mode = d->reg[B_PWR_CTRL] & 0x30;
+		if ((mode == 0x10 || mode == 0x20) && (d->reg[B_PWR_CTRL] & 0x03)) {
+			baro_forced_pending = true;
+		}
 	}
 	if (addr <= B_CMD && addr + len > B_CMD) {
 		if (d->reg[B_CMD] == 0xB6) {
@@ -274,7 +303,34 @@ static void gyro_reset(struct SPIDev *d) {
 	d->reg[G_CHIP_ID] = 0x0F;
 	d->reg[G_BANDWIDTH] = 0x80;
 	d->reg[G_IO_CONF] = 0x0F;
+	// FIFO_WM_ENABLE: stored and echoed only. The watermark interrupt it arms
+	// is an INT3/INT4 pin function and those pins are not wired to the DUT, so
+	// there is no side effect to model — but the register must EXIST, because a
+	// driver that writes it reads it straight back and refuses to run on a
+	// mismatch (PX4's BMI088 gyro does exactly that; ArduPilot never touches it).
+	d->reg[G_FIFO_WM_ENABLE] = 0x08;
 	gyro_fifo_fill = 0;
+}
+
+// BMP3xx NVM trim checksum (register 0x30), the algorithm in Bosch's
+// bmp3_selftest.c: CRC-8 poly 0x1D, seed 0xFF, final complement, over the 21
+// trim bytes at 0x31..0x45. A driver that validates the calibration this way
+// refuses to configure the part when it mismatches (PX4's BMP388 driver does;
+// ArduPilot's does not read 0x30 at all), so the emulated part has to carry it.
+static uint8_t bmp3_trim_crc(const uint8_t *trim) {
+	uint8_t crc = 0xFF;
+	for (int i = 0; i < 21; i++) {
+		uint8_t data = trim[i];
+		for (int b = 0; b < 8; b++) {
+			bool feedback = ((crc ^ data) & 0x80) != 0;
+			crc <<= 1;
+			data <<= 1;
+			if (feedback) {
+				crc ^= 0x1D;
+			}
+		}
+	}
+	return crc ^ 0xFF;
 }
 
 static void baro_reset(struct SPIDev *d) {
@@ -291,6 +347,7 @@ static void baro_reset(struct SPIDev *d) {
 	d->reg[B_OSR] = 0x02;
 	d->reg[0x15] = 0x01; // FIFO_WTM_0 reset
 	bmp390_trim_regs(&baro_trim, &d->reg[B_TRIM]);
+	d->reg[B_TRIM_CRC] = bmp3_trim_crc(&d->reg[B_TRIM]);
 }
 
 static void mag_reset(struct SPIDev *d) {
@@ -325,7 +382,8 @@ struct SPIDev mag_dev = {.cs = CS_MAG, .read_cmd_mask = 0x80, .ndummy = 0, .wmas
 struct SPIDev gyro_dev = {.cs = CS_GYRO, .read_cmd_mask = 0x80, .ndummy = 0, .wmask = gyro_wmask, .frame = gyro_frame,
                           .stream = gyro_fifo, .stream_size = sizeof gyro_fifo, .stream_addr = G_FIFO_DATA};
 struct SPIDev accel_dev = {.cs = CS_ACC, .read_cmd_mask = 0x80, .ndummy = 1, .wmask = accel_wmask, .frame = accel_frame,
-                           .stream = accel_fifo, .stream_size = sizeof accel_fifo, .stream_addr = A_FIFO_DATA};
+                           .stream = (uint8_t *)&accel_fifo, .stream_size = sizeof accel_fifo,
+                           .stream_addr = A_FIFO_DATA, .stream_prefix = A_FIFO_PREFIX};
 
 static struct SPIDev *const devtab[] = {&baro_dev, &mag_dev, &gyro_dev, &accel_dev};
 struct SPISlave sensor_bus = SPISLAVE_INITIALIZER(SPI3, DMA1_CH5, devtab, 4, 0x00);
@@ -417,6 +475,9 @@ uint32_t accel_rate_hz(void) {
 }
 
 uint32_t baro_rate_hz(void) {
+	if (baro_forced_pending) {
+		return 1000; // serve the single-shot on the next sampler tick
+	}
 	uint8_t pwr = baro_dev.reg[B_PWR_CTRL];
 	if ((pwr & 0x30) != 0x30 || (pwr & 0x03) == 0) {
 		return 0; // not in normal mode with a measurement enabled
@@ -517,10 +578,10 @@ static void accel_apply(struct SPIDev *d, void *ctx) {
 	d->reg[A_TEMP_LSB] = buf[7];
 	d->reg[A_STATUS] |= 0x80;
 	if (d->reg[A_FIFO_CONFIG1] & 0x40) { // acc_en: frames flow into the FIFO
-		if (accel_fifo_fill + 7u <= sizeof accel_fifo) {
-			accel_fifo[accel_fifo_fill] = 0x84; // accel data frame header
+		if (accel_fifo_fill + 7u <= sizeof accel_fifo.data) {
+			accel_fifo.data[accel_fifo_fill] = 0x84; // accel data frame header
 			for (int i = 0; i < 6; i++) {
-				accel_fifo[accel_fifo_fill + 1 + i] = buf[i];
+				accel_fifo.data[accel_fifo_fill + 1 + i] = buf[i];
 			}
 			accel_fifo_fill += 7;
 			accel_fifo_sync(d);
@@ -592,6 +653,10 @@ bool baro_commit(float t_degc, double p_pa, uint32_t now_us) {
 	}
 	baro_dev.reg[B_STATUS] |= (baro_dev.reg[B_PWR_CTRL] & 0x01 ? 0x20 : 0) |
 	                          (baro_dev.reg[B_PWR_CTRL] & 0x02 ? 0x40 : 0);
+	if (baro_forced_pending) {
+		baro_forced_pending = false;
+		baro_dev.reg[B_PWR_CTRL] &= ~0x30; // the forced conversion is done: back to sleep
+	}
 	if (baro_dev.reg[B_INT_CTRL] & 0x40) { // drdy_en
 		baro_dev.reg[B_INT_STATUS] |= 0x08;
 		(baro_dev.reg[B_INT_CTRL] & 0x02) ? digitalHi(DRDY_BARO) : digitalLo(DRDY_BARO);

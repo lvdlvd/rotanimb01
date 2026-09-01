@@ -197,18 +197,50 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 		return nil
 
 	case "cal":
-		// PWM_CAL deflections for an ArduPilot DUT. The harness default cal
-		// (controls.c) is all-positive: pwm HIGH = positive deflection, which
-		// per fdm.c convention (Cmde < 0) is NOSE-DOWN elevator. ArduPilot
-		// outputs ch2 HIGH for nose-UP, so the elevator wants a NEGATIVE full
-		// deflection. This cal lives in harness RAM ONLY — resend after EVERY
-		// harness reboot (incl. uhubctl power cycles hitting shared hub
-		// ports), or the DUT flies with an inverted elevator: no rotation on
-		// takeoff, elevator railed, ground-roll overspeed.
-		for i, c := range []struct {
+		// PWM_CAL deflections, per autopilot. The harness default cal
+		// (controls.c) is all-positive: pwm HIGH = positive deflection, and
+		// per fdm.c's classic aero signs a positive deflection is nose-DOWN
+		// (Cmde -1.2) and nose-LEFT (Cndr -0.08); aileron matches (Clda +0.17
+		// = roll right). Whichever axes the autopilot drives the other way
+		// need a NEGATIVE full deflection here.
+		//
+		// This cal lives in harness RAM ONLY — resend after EVERY harness
+		// reboot (incl. uhubctl power cycles hitting shared hub ports) and
+		// after every harness reflash, or the DUT flies with a reversed
+		// surface: no rotation on takeoff, elevator railed, ground-roll
+		// overspeed.
+		//
+		//   ardupilot (default): ail +, ELE FLIPPED, rud +
+		//   px4:                 ail +, ELE FLIPPED, RUD FLIPPED
+		//
+		// PX4 drives its outputs as "+ = positive body torque" in FRD, so
+		// +pitch is nose-UP and +yaw is nose-RIGHT — both opposite to the
+		// fdm. Same mapping the flight-verified px4hil SITL bridge applies
+		// (tools/px4hil/main.go: negate ele + rud, aileron matches).
+		profile := "ardupilot"
+		if len(args) > 0 {
+			profile = args[0]
+		}
+		var cal []struct {
 			chan_ byte
 			cdeg  int16
-		}{{0, 2000}, {1, -2500}, {3, 2500}} { // ail, ELE FLIPPED, rud
+		}
+		switch profile {
+		case "ardupilot":
+			cal = []struct {
+				chan_ byte
+				cdeg  int16
+			}{{0, 2000}, {1, -2500}, {3, 2500}}
+		case "px4":
+			cal = []struct {
+				chan_ byte
+				cdeg  int16
+			}{{0, 2000}, {1, -2500}, {3, -2500}}
+		default:
+			return fmt.Errorf("drive cal [ardupilot|px4]: unknown profile %q", profile)
+		}
+		names := [4]string{"ail", "ele", "thr", "rud"}
+		for i, c := range cal {
 			p := make([]byte, 8)
 			p[0] = c.chan_
 			p[1] = 1 // part 1 = deflection, 0.01 deg units
@@ -216,6 +248,7 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 			if err := harnessCmd(dev, canPWMCal, uint32(4+i), p); err != nil {
 				return err
 			}
+			fmt.Printf("cal %s: %s = %+.2f deg\n", profile, names[c.chan_], float64(c.cdeg)/100)
 			time.Sleep(100 * time.Millisecond)
 		}
 		return tailPrint(con, 2.5, 2)

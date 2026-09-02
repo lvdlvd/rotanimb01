@@ -1,14 +1,14 @@
 .DS_Store
 
-# build artifacts (src generates device.h/pinmux.h/*.ld via narray)
+# build artifacts. The narray-generated files (src/device.h, src/pinmux.h,
+# src/devs.ld, src/STM32G474Exx_RAM.ld) and the lib copies in src/nlib/ are
+# NOT ignored: they are the vendored [N]Array sources this repo builds from,
+# and `make -C src n-array-clean` is what refreshes them. See src/Makefile.
 *.o
 *.elf
 *.bin
 *.hex
 *.map
-/src/device.h
-/src/pinmux.h
-/src/*.ld
 /bmp390inv/golden
 /rb01tool/rb01tool
 /fdm/turncheck

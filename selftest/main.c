@@ -23,6 +23,7 @@
 #include "bmp390lin.h"
 #include "clock.h"
 #include "console.h"
+#include "dma_g4.h"  // G4 DMAMUX requests (n-array family split, 34bfac9)
 #include "exti.h"
 #include "fault.h"
 #include "gpio.h"
@@ -31,6 +32,7 @@
 #include "spi.h"
 #include "spislave.h"
 #include "startup.h"
+#include "usart_v3.h" // usart_init_tx for FIFO-family USARTs (same split)
 
 extern const isr_t __vectors[];
 
@@ -66,17 +68,17 @@ static void pump(void) {
 	if ((hz = accel_rate_hz()) != 0 && now - t_a >= 1000000u / hz) {
 		t_a = now;
 		int16_t g1[3] = {0, 0, (int16_t)(32767.0f / accel_fullscale_g())};
-		accel_commit(g1, 25.0f);
+		accel_commit(g1, 25.0f, now);
 	}
 	if ((hz = baro_rate_hz()) != 0 && now - t_b >= 1000000u / hz) {
 		t_b = now;
-		baro_commit(15.0f, 101325.0);
+		baro_commit(15.0f, 101325.0, now);
 	}
 	if ((hz = mag_rate_hz()) != 0 && now - t_m >= 1000000u / hz) {
 		t_m = now;
 		float lsb = mag_lsb_per_ut();
 		int32_t field[3] = {(int32_t)(20.0f * lsb), 0, (int32_t)(44.0f * lsb)};
-		mag_commit(field);
+		mag_commit(field, now);
 	}
 }
 

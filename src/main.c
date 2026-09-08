@@ -190,9 +190,10 @@ static void fdm_publish_truth(void) {
 
 // ---- the on-board DroneCAN GPS/airspeed feeder (fdm-DESIGN.md F4) -------------
 //
-// FDCAN3 (PB3/PB4) straight onto the DUT's CAN bus, no bridge board: Fix2 +
-// RawAirData at 5 Hz from the fdm truth held back by a configurable lag (a
-// zero-latency GPS would make HITL kinder than reality), NodeStatus at 1 Hz.
+// FDCAN3 (PB3/PB4) straight onto the DUT's CAN bus, no bridge board: Fix2 at
+// 5 Hz from the fdm truth held back by a configurable lag (a zero-latency GPS
+// would make HITL kinder than reality), RawAirData at 20 Hz and unconditional
+// (see gps_feed_air), NodeStatus at 1 Hz.
 // Node id 42. GPS_CFG (TMC 0x48) sets enable and lag at runtime.
 static struct FDCan can_gps = FDCAN_INITIALIZER(FDCAN3);
 static volatile uint32_t gps_busoff;
@@ -237,16 +238,46 @@ static uint8_t gps_tid_fix, gps_tid_air, gps_tid_ns;
 static const int64_t gps_lat0_1e8 = 4552688000LL, gps_lon0_1e8 = 166729100LL;
 static const int64_t gps_ncm_num = 89831, gps_ecm_num = 128225, gps_cm_den = 10000;
 
-static void gps_feed(uint32_t now) {
+// the lagged truth snapshot the feed is derived from, or NULL before the
+// fdm has produced lag_us of history
+static const struct GpsSnap *gps_snap(uint32_t now) {
 	uint32_t lag_us = (uint32_t)gps_lag_10ms * 10000u;
-	const struct GpsSnap *snap = NULL;
 	for (uint32_t i = 0; i < 8; i++) {
 		const struct GpsSnap *c = &gps_ring[(gps_head - 1 - i) & 7];
 		if (c->us != 0 && now - c->us >= lag_us) {
-			snap = c;
-			break;
+			return c;
 		}
 	}
+	return NULL;
+}
+
+// RawAirData, sent UNCONDITIONALLY from the first instant of boot — a
+// parked harness reports zero airspeed rather than staying silent. The
+// consumer's binding is one-shot: ArduPilot's AP_Airspeed::init() runs
+// once (AP_Vehicle.cpp) and AP_Airspeed_DroneCAN::probe() can only bind
+// a node whose RawAirData has ALREADY been handled, so a node that
+// starts talking later never binds for that boot — measured on the
+// bench 2026-09-08, ARSPD_DEVID stuck at 0 across clean boots.
+// Rate is 20 Hz because the consumer's staleness windows are 250 ms for
+// differential pressure and 100 ms for temperature: at the old 5 Hz the
+// temperature was ALWAYS stale and the pressure had 50 ms of margin.
+// Unlike Fix2 this is not a deliberately-degraded feed — real pitot
+// sensors run fast, so 20 Hz is fidelity, not kindness.
+static void gps_feed_air(uint32_t now) {
+	const struct GpsSnap *snap = gps_snap(now);
+	float ias = snap != NULL ? snap->ias_dms * 0.1f : 0.0f;
+	uint8_t buf[64];
+	struct DroneCanFrame fr[16];
+	int n = dronecan_broadcast(DRONECAN_RAWAIR_ID, DRONECAN_RAWAIR_SIGNATURE, DRONECAN_PRIO_MEDIUM,
+	                           42, &gps_tid_air, buf,
+	                           dronecan_rawair(0.5f * 1.225f * ias * ias, 0.0f, 288.15f, buf), fr, 16);
+	gps_enqueue(fr, n);
+}
+
+// Fix2 stays 5 Hz behind the configurable lag: a zero-latency GPS would
+// make HITL kinder than reality, and it needs the fdm to have a position.
+static void gps_feed(uint32_t now) {
+	const struct GpsSnap *snap = gps_snap(now);
 	if (snap == NULL) {
 		return;
 	}
@@ -265,11 +296,6 @@ static void gps_feed(uint32_t now) {
 	struct DroneCanFrame fr[16];
 	int n = dronecan_broadcast(DRONECAN_FIX2_ID, DRONECAN_FIX2_SIGNATURE, DRONECAN_PRIO_MEDIUM,
 	                           42, &gps_tid_fix, buf, dronecan_fix2(&fx, buf), fr, 16);
-	gps_enqueue(fr, n);
-	float ias = snap->ias_dms * 0.1f;
-	n = dronecan_broadcast(DRONECAN_RAWAIR_ID, DRONECAN_RAWAIR_SIGNATURE, DRONECAN_PRIO_MEDIUM,
-	                       42, &gps_tid_air, buf,
-	                       dronecan_rawair(0.5f * 1.225f * ias * ias, 0.0f, 288.15f, buf), fr, 16);
 	gps_enqueue(fr, n);
 }
 
@@ -581,7 +607,7 @@ void Reset_Handler(void) {
 	} chan[8] = {0};
 
 	uint32_t t_pwm = now_us(), t_status = t_pwm, t_diag = t_pwm, t_tick = t_pwm, t_truth = t_pwm,
-			 t_gpsfeed = t_pwm, t_nodest = t_pwm;
+			 t_gpsfeed = t_pwm, t_airfeed = t_pwm, t_nodest = t_pwm;
 	for (;;) {
 		// console RX echo (link sanity, M0 heritage)
 		uint8_t chunk[64];
@@ -728,7 +754,13 @@ void Reset_Handler(void) {
 		// unsigned deltas: with (int32_t), a timer first armed after ~35.8 min
 		// of uptime saw now - 0 wrap negative and never fired — fdm enabled
 		// late produced no TRUTH_* and no GPS feed (found 2026-08-07)
-		if (gps_enable && fdm_mode && now - t_gpsfeed >= 200000) { // DroneCAN 5 Hz
+		// air data BEFORE Fix2: when both fall due in the same tick the
+		// 11-frame Fix2 burst would otherwise sit ahead of it in the queue
+		if (gps_enable && now - t_airfeed >= 50000) { // RawAirData 20 Hz
+			t_airfeed = now;
+			gps_feed_air(now);
+		}
+		if (gps_enable && fdm_mode && now - t_gpsfeed >= 200000) { // Fix2 5 Hz
 			t_gpsfeed = now;
 			gps_feed(now);
 		}

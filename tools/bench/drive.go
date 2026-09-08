@@ -26,7 +26,23 @@ const (
 	canParam    = 0x47
 	canPWMCal   = 0x45
 	canWind     = 0x46
+	canGPSCfg   = 0x48
 )
+
+// gpsCfgPayload encodes GPS_CFG (canmsg.h 0x48): u8 enable, u8 feeder lag
+// in 10 ms units, zero-padded to the 8 bytes every command frame carries.
+// The harness default is enable=1, lag 150 ms.
+func gpsCfgPayload(enable bool, lagMs int) ([]byte, error) {
+	if lagMs < 0 || lagMs > 2550 {
+		return nil, fmt.Errorf("gps lag %d ms out of range 0..2550", lagMs)
+	}
+	p := make([]byte, 8)
+	if enable {
+		p[0] = 1
+	}
+	p[1] = byte(lagMs / 10)
+	return p, nil
+}
 
 // id29: LCC 6 (TMC) | msgid | PRV | srcid 0xb0 | 0x9 | seq
 func id29(msgid, seq uint32) uint32 {
@@ -144,6 +160,29 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 			return err
 		}
 		return tailPrint(con, 2.5, 3)
+
+	case "gps":
+		// enable/disable the harness's on-board DroneCAN GPS feeder
+		// (GPS-denied segments); optional lag in ms (default 150).
+		if len(args) < 1 || (args[0] != "0" && args[0] != "1") {
+			return fmt.Errorf("drive gps <0|1> [lag_ms]")
+		}
+		lag := 150
+		if len(args) > 1 {
+			var err error
+			if lag, err = strconv.Atoi(args[1]); err != nil {
+				return fmt.Errorf("drive gps: lag %q: %v", args[1], err)
+			}
+		}
+		p, err := gpsCfgPayload(args[0] == "1", lag)
+		if err != nil {
+			return err
+		}
+		if err := harnessCmd(dev, canGPSCfg, 4, p); err != nil {
+			return err
+		}
+		fmt.Printf("gps feeder enable=%s lag=%d ms sent\n", args[0], lag)
+		return nil
 
 	case "wind":
 		if len(args) < 2 {

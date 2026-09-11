@@ -9,9 +9,9 @@
 // v0.2 scope: HEARTBEAT + HIL_SENSOR (250 Hz, dithered) + HIL_GPS
 // (5 Hz) out, HIL_ACTUATOR_CONTROLS in (PX4 torque signs mapped to the
 // fdm's aero signs), harness actuator-lag model, ground start at the
-// bench anchor, -truth JSON UDP tap (sitljson format) for the vnav
-// driver. Flight-verified against px4_sitl_default 5100_px4hil_kitfox:
-// auto runway takeoff to 100 m + loiter, EKF2 healthy.
+// bench anchor, -truth JSON UDP tap (sitljson format) for external truth
+// consumers. Flight-verified against px4_sitl_default with a Kitfox
+// airframe: auto runway takeoff to 100 m + loiter, EKF2 healthy.
 package main
 
 import (
@@ -85,8 +85,8 @@ func main() {
 	truthPort := flag.Int("truth", 0, "UDP truth tap port on localhost, sitljson JSON format, ~10 Hz (0 = off)")
 	flag.Parse()
 
-	// truth tap: same JSON the sitljson wrapper mirrors, so the vnav
-	// driver reads identical truth whichever autopilot is flying
+	// truth tap: same JSON the sitljson wrapper mirrors, so a truth
+	// consumer reads identical truth whichever autopilot is flying
 	var truth net.Conn
 	if *truthPort != 0 {
 		var err error

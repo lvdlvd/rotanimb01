@@ -8,16 +8,42 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// the pi's stable by-id paths
-const (
-	defHarnCmd = "/dev/serial/by-id/usb-rotanimb01_hitl-harness_2038334D46325004004F0038-if00"
-	defHarnCon = "/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_066DFF535550755187243416-if02"
-)
+// Device defaults. The environment variable wins; otherwise the by-id glob
+// must match exactly one device (Linux keeps /dev/serial/by-id/ stable
+// across reboots and port moves, ttyACM numbers are not). With two ST-Links
+// on one host the console glob is ambiguous — set the variable.
+//
+//	ROTANIMB01_HARNESS   the harness pseudocan CDC (commands + TRUTH_* telemetry)
+//	ROTANIMB01_CONSOLE   the harness ST-Link VCP (heartbeat/console tail)
+//	ROTANIMB01_DUT       the DUT's MAVLink CDC (serbridge)
+func devDefault(env, glob string) string {
+	if v := os.Getenv(env); v != "" {
+		return v
+	}
+	if m, _ := filepath.Glob(glob); len(m) == 1 {
+		return m[0]
+	}
+	return glob // open fails naming what was looked for
+}
+
+func defHarnCmd() string {
+	return devDefault("ROTANIMB01_HARNESS", "/dev/serial/by-id/usb-rotanimb01_hitl-harness_*-if00")
+}
+
+func defHarnCon() string {
+	return devDefault("ROTANIMB01_CONSOLE", "/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_*-if02")
+}
+
+func defDutDev() string {
+	return devDefault("ROTANIMB01_DUT", "/dev/serial/by-id/usb-ArduPilot_*-if00")
+}
 
 const (
 	canMode     = 0x43
@@ -209,7 +235,7 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 
 	case "engine":
 		// preset the FDM engine params (power_w 41, t_static_n 42,
-		// crit_alt_m 43). 912iS = the owner's actual engine (default);
+		// crit_alt_m 43). 912iS = the model's default, naturally aspirated;
 		// 915iS = turbo, rated to FL150 — the high-altitude bench choice.
 		if len(args) < 1 {
 			return fmt.Errorf("drive engine <912|915>")

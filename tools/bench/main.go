@@ -12,12 +12,13 @@
 //	bench tune      [-c addr] [-rev 200]
 //	bench disarm    [-c addr]        (force)
 //	bench reboot    [-c addr]
-//	bench drive     <mode|airstart|wind|cal|tail> [args]   (on the pi)
-//	bench serbridge [-dev path] [-port 5760]               (on the pi)
+//	bench watch     [-c addr] [-dur 2m]
+//	bench drive     <mode|airstart|setpos|gps|wind|engine|cal|tail> [args]   (on the bench host)
+//	bench serbridge [-dev path] [-port 5760]                                 (on the bench host)
 //
 // Defaults: -c 127.0.0.1:5760 (SITL). The bench is the same port through
-// serbridge on the pi (mDNS names don't resolve from Go/python sockets on
-// macOS — use the pi's IP).
+// serbridge on the host the USB devices hang off (mDNS names don't resolve
+// from Go sockets on macOS — use the host's IP). Device defaults: drive.go.
 package main
 
 import (
@@ -177,18 +178,18 @@ func main() {
 		fmt.Println("reboot sent")
 
 	case "drive":
-		dev := fs.String("dev", defHarnCmd, "harness pseudocan CDC device")
-		con := fs.String("con", defHarnCon, "harness ST-Link console device")
+		dev := fs.String("dev", defHarnCmd(), "harness pseudocan CDC device ($ROTANIMB01_HARNESS)")
+		con := fs.String("con", defHarnCon(), "harness ST-Link console device ($ROTANIMB01_CONSOLE)")
 		fs.Parse(args)
 		rest := fs.Args()
 		if len(rest) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: bench drive <mode|airstart|wind|cal|tail> [args]")
+			fmt.Fprintln(os.Stderr, "usage: bench drive <mode|airstart|setpos|gps|wind|engine|cal|tail> [args]")
 			os.Exit(2)
 		}
 		err = cmdDrive(rest[0], *dev, *con, rest[1:])
 
 	case "serbridge":
-		dev := fs.String("dev", "/dev/serial/by-id/usb-ArduPilot_NucleoF767ZI_240044000451323232383933-if00", "serial device")
+		dev := fs.String("dev", defDutDev(), "DUT MAVLink serial device ($ROTANIMB01_DUT)")
 		port := fs.Int("port", 5760, "TCP listen port")
 		fs.Parse(args)
 		err = cmdSerbridge(*dev, *port)

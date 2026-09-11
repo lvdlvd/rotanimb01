@@ -230,11 +230,12 @@ static uint32_t gps_head;
 static uint8_t gps_enable = 1, gps_lag_10ms = 15;
 static uint8_t gps_tid_fix, gps_tid_air, gps_tid_ns;
 
-// feeder origin: 45.52688 N, 1.667291 E — the vnav map region (golden frame
-// f15), so the bench flies over the terrain the camera's map tiles cover.
-// Integer microdegree math — float32 cannot carry 1e-8 deg at these
-// magnitudes. 1 cm north = 8.9831e-4 deg * 1e8 / 1e4; east scaled by
-// 1/cos(45.52688 deg) = 1/0.70057.
+// feeder origin: 45.52688 N, 1.667291 E — open farmland in central France,
+// far from any real traffic; the example missions in doc/ are laid out
+// around it. Integer microdegree math — float32 cannot carry 1e-8 deg at
+// these magnitudes. 1 cm north = 8.9831e-4 deg * 1e8 / 1e4; east scaled by
+// 1/cos(45.52688 deg) = 1/0.70057. Changing the origin means changing all
+// three constants (and the missions).
 static const int64_t gps_lat0_1e8 = 4552688000LL, gps_lon0_1e8 = 166729100LL;
 static const int64_t gps_ncm_num = 89831, gps_ecm_num = 128225, gps_cm_den = 10000;
 

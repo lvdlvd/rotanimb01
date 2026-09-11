@@ -177,7 +177,7 @@ void fdm_step(struct Fdm *f, const struct FdmControls *c, float dt) {
 	float Faz = -D * sa - L * ca;
 	float Fay = qbar * p->S * CY;
 
-	// prop: power-based thrust along +x (owner's engine/prop data: 100 hp,
+	// prop: power-based thrust along +x (the reference aircraft's engine/prop: 100 hp,
 	// eta 0.50 static rising to 0.85 by cruise), capped by the momentum-
 	// theory static limit; torque reaction about x
 	float eta = 0.50f + 0.35f * (va > 40.0f ? 1.0f : va * (1.0f / 40.0f));
@@ -349,7 +349,7 @@ void fdm_defaults(struct Fdm *f) {
 	p->Cnb = 0.07f; p->Cnp = -0.03f; p->Cnr = -0.10f; p->Cnda = -0.01f; p->Cndr = -0.08f;
 	// prop anchors: static thrust 1600 N, 890 N at 46 m/s and 75% throttle
 	p->km = 582.0f; p->CpSp = 0.00772f; p->kQ = 3.0e-4f;
-	// engine: the owner's actual Rotax 912iS (100 hp, naturally aspirated)
+	// engine: the reference aircraft's Rotax 912iS (100 hp, naturally aspirated)
 	p->power_w = 74600.0f; p->t_static_n = 1601.0f; p->crit_alt_m = 0.0f;
 	p->mag_n[0] = 19.97f; p->mag_n[2] = 44.01f; // the bench-cal field
 	p->qnh_pa = 101325.0f; p->t0_k = 288.15f;

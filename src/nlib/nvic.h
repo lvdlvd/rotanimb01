@@ -1,8 +1,8 @@
 #pragma once
 
-// NVIC — the core of the [N]Array non-operating-system.
+// NVIC — the core of the non-operating-system.
 //
-// In [N]Array the interrupt vector table is the program: a designated-
+// Here the interrupt vector table is the program: a designated-
 // initializer array the application owns, with handlers placed by the
 // generated IRQn_Type enum. This header is the API for that table and for the
 // controller that dispatches through it. It owns three things:
@@ -15,12 +15,12 @@
 // Reset, faults, SVCall, PendSV, SysTick), device IRQ n is at slot n+16.
 // VECTOR() expresses that for the table literal; the core slots are positional.
 //
-// Requires the narray-generated device header (NVIC, SCB, IRQn_Type,
+// Requires the generated device header (NVIC, SCB, IRQn_Type,
 // NVIC_VECTORS) to be included first. This layout is Cortex-M3/M4/M7; M0+ has
 // a single ISER and no IABR and needs its own version.
 
-#ifndef NARRAY_DEVICE
-#error "include the narray-generated device header before nvic.h"
+#ifndef DEVICE_FAMILY
+#error "include the generated device header before nvic.h"
 #endif
 
 typedef void (*isr_t)(void);

@@ -22,7 +22,7 @@
 // bound, plus a ~100 ns input glitch filter) up to the counter wrap
 // (16-bit: 65.5 ms; 32-bit TIM2/TIM5: 71.6 min).
 //
-// The application owns the interrupt vectors (the [N]Array model) and the
+// The application owns the interrupt vectors (the lib model) and the
 // staleness policy: `count` advances once per completed period measurement,
 // so a reader polling at its own rate detects a disconnected channel as
 // `count` standing still (e.g. unchanged for 100 ms -> report width 0).

@@ -12,7 +12,7 @@
 // the same datasheet polynomial, so they must agree to integer-truncation
 // tolerance. That anchors the float model to what the DUT family computes.
 //
-//   cc -O2 -o golden golden.c bmp390lin.c <bminator>/src/bmp388.c -lm
+//   cc -O2 -o golden golden.c bmp390lin.c bmp388.c -lm
 
 #include "bmp390lin.h"
 

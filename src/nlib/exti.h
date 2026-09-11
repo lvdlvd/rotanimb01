@@ -6,7 +6,7 @@
 // port drives each line, so two pins with the same pin NUMBER cannot both
 // have an EXTI, regardless of port. The functions take an enum GPIO_Pin
 // (one port + pin mask, multi-pin masks applied per set bit) and follow the
-// [N]Array division of labor: the application enables the SYSCFG clock
+// Division of labor: the application enables the SYSCFG clock
 // (RCC_APB2ENR_SYSCFGEN) before routing, owns the NVIC lines and the vector
 // slots (EXTI0..EXTI4 have their own vectors; 5-9 and 10-15 share
 // EXTI9_5_IRQn / EXTI15_10_IRQn), and clears pending bits in its handler.

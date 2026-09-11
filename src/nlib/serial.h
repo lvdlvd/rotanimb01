@@ -3,7 +3,7 @@
 // DMA- and IRQ-driven buffered serial (U[S]ART) for STM32G4, over the lib/fifo
 // ring buffer. One struct Serial per direction (RX or TX) of a U[S]ART.
 //
-// The application owns the interrupt vectors (the [N]Array model): wire the
+// The application owns the interrupt vectors (the lib model): wire the
 // channel and USART handlers to call the serial_*_handler() routines below.
 //
 // Bring-up sketch:

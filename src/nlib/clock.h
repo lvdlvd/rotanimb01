@@ -1,6 +1,6 @@
 #pragma once
 
-// Clock setup for [N]Array (STM32G4). The model: detect whether an HSE crystal
+// Clock setup (STM32G4). The model: detect whether an HSE crystal
 // is fitted and measure its frequency at runtime (RM0440 §7.2.16 — TIM16 input-
 // capture of HSE/32 against the 16 MHz HSI), then a handful of preset targets
 // bring SYSCLK up using the PLL (off HSE if present, else HSI16), taking care of
@@ -14,7 +14,7 @@
 // Peripheral clock *enables* are the application's job (RCC.APBxENR |= ... at
 // the top of main), as in the reference projects — this library only reads.
 //
-// Requires the narray device header as "device.h".
+// Requires the generated device header as "device.h".
 
 #include "device.h"
 #include <stdint.h>

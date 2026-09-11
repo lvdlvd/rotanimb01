@@ -13,7 +13,7 @@
 // ones — using an absent channel is the caller's responsibility, like an
 // unexposed pin.
 //
-// Requires the narray device header as "device.h".
+// Requires the generated device header as "device.h".
 
 #include "device.h"
 #include <stddef.h>

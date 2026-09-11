@@ -35,7 +35,7 @@
 
 #include "tprintf.h"
 
-// [N]Array: %f/%e/%g off by default — float formatting is the only
+// %f/%e/%g off by default — float formatting is the only
 // double-precision code in a typical image (varargs promote float to
 // double), and the bare-metal targets print integers. Projects that carry
 // doubles anyway (libm linked) opt back in with -DPRINTF_ENABLE_FLOAT.

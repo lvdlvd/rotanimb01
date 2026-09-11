@@ -1,9 +1,8 @@
 .DS_Store
 
-# build artifacts. The narray-generated files (src/device.h, src/pinmux.h,
-# src/devs.ld, src/STM32G474Exx_RAM.ld) and the lib copies in src/nlib/ are
-# NOT ignored: they are the vendored [N]Array sources this repo builds from,
-# and `make -C src n-array-clean` is what refreshes them. See src/Makefile.
+# build artifacts. The generated device files (src/device.h, src/pinmux.h,
+# src/devs.ld, src/STM32G474Exx_RAM.ld) and the support library in src/nlib/
+# are sources, not build products — they are tracked.
 *.o
 *.elf
 *.bin
@@ -13,6 +12,9 @@
 /rb01tool/rb01tool
 /fdm/turncheck
 /fdm/sitljson
+/fdm/golden
+/physics/golden
+/src/dccheck
 __pycache__/
 /src/mav.parm
 /src/mav.tlog*

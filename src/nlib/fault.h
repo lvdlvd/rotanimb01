@@ -1,6 +1,6 @@
 #pragma once
 
-// Fault, assert and stray-IRQ trapping for [N]Array (Cortex-M4).
+// Fault, assert and stray-IRQ trapping for bare-metal Cortex-M4.
 //
 // Faults capture a minimal post-mortem into a no-init crash record at the low
 // end of CCRAM (survives reset): the causal PC/LR + fault cause, and a call-
@@ -11,14 +11,14 @@
 // offline symbolizer (arm-none-eabi-addr2line -fie fw.elf <addrs>) to recover
 // source:line of each call site.
 //
-// Stray IRQs: with the [N]Array NULL-vector model, an unwired IRQ branches to 0
+// Stray IRQs: with the NULL-vector model, an unwired IRQ branches to 0
 // and faults; the fault handler recognises pc≈0 and records the IRQ number from
 // the stacked xPSR. No default IRQ handler is needed.
 //
 // The app wires the four fault handlers into its vector table (slots 3-6):
 //   HardFault_Handler, MemManage_Handler, BusFault_Handler, UsageFault_Handler.
 //
-// Requires the narray device header as "device.h" and the linker symbols
+// Requires the generated device header as "device.h" and the linker symbols
 // _estack, _stack_limit (lib/sections.ld), _stext, _etext.
 
 #include <stdint.h>

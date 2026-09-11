@@ -11,7 +11,7 @@
 // One struct FDCan per controller bundles the register block, the
 // controller's slice of the message RAM, and the status counters (the
 // serial.h pattern). The application owns the clocks, pins, NVIC and
-// vectors (the [N]Array model). Each controller has two interrupt lines:
+// vectors (the lib model). Each controller has two interrupt lines:
 // the driver routes RX FIFO events to IT1 and everything else (TX events,
 // errors) to IT0.
 //

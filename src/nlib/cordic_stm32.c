@@ -1,5 +1,5 @@
 // cordic_stm32.c — device backend: drives the STM32G4 CORDIC coprocessor via
-// the narray-generated CORDIC singleton.
+// the generated CORDIC singleton.
 //
 // Zero-overhead mode (RM0440 §17.3.6): write CSR, push argument(s) to WDATA,
 // then read RDATA — the read inserts AHB wait states until the result is

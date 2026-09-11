@@ -65,7 +65,7 @@
 // or commits scheduled off the TX DMA half-transfer interrupt.
 //
 // The application owns clocks, pins, EXTI routing, DMAMUX and all vectors
-// (the [N]Array model): route the TX channel (dma_set_mux SPIn_TX), wire the
+// (the lib model): route the TX channel (dma_set_mux SPIn_TX), wire the
 // SPI vector to spislave_irq_handler and every CS EXTI vector to
 // spislave_cs_handler, all at the highest device priority — nothing else in
 // the system may share it.

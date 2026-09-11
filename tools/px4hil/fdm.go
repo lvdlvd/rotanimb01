@@ -5,7 +5,7 @@
 package main
 
 /*
-#cgo CFLAGS: -I../../fdm -I../../../n-array/lib -I../../../cordic-math/src -O2 -fno-builtin
+#cgo CFLAGS: -I../../fdm -I../../src/nlib -O2 -fno-builtin
 #include "fdm.h"
 #include <stdlib.h>
 */

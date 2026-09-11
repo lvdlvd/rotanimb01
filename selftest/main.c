@@ -23,7 +23,7 @@
 #include "bmp390lin.h"
 #include "clock.h"
 #include "console.h"
-#include "dma_g4.h"  // G4 DMAMUX requests (n-array family split, 34bfac9)
+#include "dma_g4.h"  // G4 DMAMUX requests
 #include "exti.h"
 #include "fault.h"
 #include "gpio.h"
@@ -32,7 +32,7 @@
 #include "spi.h"
 #include "spislave.h"
 #include "startup.h"
-#include "usart_v3.h" // usart_init_tx for FIFO-family USARTs (same split)
+#include "usart_v3.h" // usart_init_tx for FIFO-family USARTs
 
 extern const isr_t __vectors[];
 
@@ -472,7 +472,7 @@ static const pinconf_t master_pins[] = {
 
 void Reset_Handler(void) __attribute__((noreturn));
 void Reset_Handler(void) {
-	narray_init_memory();
+	startup_init_memory();
 	SCB.VTOR = (uint32_t)(uintptr_t)__vectors;
 	*(volatile uint32_t *)0xE000ED88 |= 0xfu << 20;
 	SCB.SHCSR |= SCB_SHCSR_USGFAULTENA;

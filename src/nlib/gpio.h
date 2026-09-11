@@ -1,12 +1,12 @@
 #pragma once
 
-// GPIO runtime for [N]Array. Consumes the generated pinmux.h (the GPIO_Pin /
+// GPIO runtime. Consumes the generated pinmux.h (the GPIO_Pin /
 // GPIO_Conf / pinconf_t constants) and the device register header. A board's
 // whole pinout is an array of pinconf_t — a pin OR'd with its configuration,
 // e.g. PA9_USART1_TX | PIN_HIGH — applied with gpioConfigAll(); digitalHi/Lo/
 // toggle/in drive already-configured pins.
 //
-// The narray-generated register header is included as "device.h" (struct
+// The generated register header is included as "device.h" (struct
 // GPIO_Type, GPIOA); pinmux.h supplies the pin/mux/flag constants.
 // The application owns the clock: enable the GPIO port clocks in RCC before
 // calling gpioConfig (this library touches only the GPIO registers).

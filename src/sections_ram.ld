@@ -1,13 +1,13 @@
 /*
- * RAM-run section layout for [N]Array: a standalone flash image whose code
+ * RAM-run section layout: a standalone flash image whose code
  * executes from SRAM1 at zero wait states.
  *
  * Code and vectors are linked at 0x00000000 — the boot alias, where the main
  * flash appears out of reset and where SRAM1 appears after the SYSCFG remap.
- * The image is stored in flash (LOAD); narray_init_memory(), still executing
+ * The image is stored in flash (LOAD); startup_init_memory(), still executing
  * from the flash alias, copies the code image to its physical SRAM1 home
  * (the .textimage reservation at the bottom of DATA), copies .data, zeroes
- * .bss; the Reset_Handler then calls narray_remap0() (lib/remap_g4.h) to map
+ * .bss; the Reset_Handler then calls startup_remap0() (lib/remap_g4.h) to map
  * SRAM1 at 0x00000000: every address stays valid while fetches move to SRAM.
  * Nothing here depends on a debugger.
  *
@@ -30,7 +30,7 @@ SECTIONS
     . = ALIGN(4);
     _stext = .;                  /* code span, for the fault backtrace scanner */
     *(.text) *(.text.*)
-    *(.fast) *(.fast.*)          /* NARRAY_FAST: whole image runs from SRAM here */
+    *(.fast) *(.fast.*)          /* FASTCODE: whole image runs from SRAM here */
     *(.rodata) *(.rodata.*)
     . = ALIGN(4);
     _etext = .;
@@ -63,14 +63,14 @@ SECTIONS
     _ebss = .;
   } > DATA
 
-  /* NARRAY_DMABUF buffers: NOLOAD, not zeroed — the owner initialises them */
+  /* DMABUF buffers: NOLOAD, not zeroed — the owner initialises them */
   .dmabuf (NOLOAD) : {
     . = ALIGN(4);
     *(.dmabuf) *(.dmabuf.*)
     . = ALIGN(4);
   } > DMARAM
 
-  /* fast-copy hooks, inert: NARRAY_FAST code is in the image copied above */
+  /* fast-copy hooks, inert: FASTCODE code is in the image copied above */
   _sifast = 0;
   _sfast = 0;
   _efast = 0;

@@ -85,7 +85,7 @@ static volatile bool baro_forced_pending; // single-shot FORCED conversion await
 // ArduPilot's reads 0x24-0x25 and 0x26 separately. Both are served by
 // mirroring the two length bytes into the head of the stream buffer and
 // telling the engine the port may be entered two registers early
-// (stream_prefix, see n-array lib/spislave.h).
+// (stream_prefix, see nlib/spislave.h).
 #define A_FIFO_PREFIX 2
 static struct {
 	uint8_t len[A_FIFO_PREFIX]; // mirror of FIFO_LENGTH_0/1 at 0x24/0x25

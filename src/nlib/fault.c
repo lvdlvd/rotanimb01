@@ -169,10 +169,10 @@ void fault_report(void (*putc)(char)) {
 	if (crashdump.overflow) {
 		puts_(putc, " STACK-OVERFLOW");
 	}
-	// The address sequence after a clean NARRAY-BT...END marker, so the offline
+	// The address sequence after a clean CRASH-BT...END marker, so the offline
 	// symbolizer can find it in arbitrary pasted console text. pc and lr lead
 	// (most precise), then the harvested call chain.
-	puts_(putc, "\nNARRAY-BT ");
+	puts_(putc, "\nCRASH-BT ");
 	hex_(putc, crashdump.pc);
 	putc(' ');
 	hex_(putc, crashdump.lr);

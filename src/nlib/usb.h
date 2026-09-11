@@ -17,7 +17,7 @@
 // Lineage: the STM32F103 bulk driver at github.com/daedaleanai/stm32f103_usb,
 // ported to the G4 registers and grown CDC control semantics.
 //
-// The app owns clocks and vectors ([N]Array model). Bring-up:
+// The app owns clocks and vectors (the lib model). Bring-up:
 //
 //     PWR.CR3 |= PWR_CR3_UCPD1_DBDIS;                     // dead-battery pull-downs off!
 //     RCC.CRRCR |= RCC_CRRCR_HSI48ON;                     // 48 MHz kernel clock

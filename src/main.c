@@ -34,8 +34,8 @@
 #include "clock.h"
 #include "exti.h"
 #include "console.h" // pulls serial.h + tprintf.h
-#include "dma_g4.h"  // G4 DMAMUX requests (n-array family split, 34bfac9)
-#include "usart_v3.h" // usart_init for FIFO-family USARTs (same split)
+#include "dma_g4.h"  // G4 DMAMUX requests
+#include "usart_v3.h" // usart_init for FIFO-family USARTs
 #include "fault.h"
 #include "fdcan.h"
 #include "gpio.h"
@@ -517,8 +517,8 @@ static void cmd_decode(void) {
 
 void Reset_Handler(void) __attribute__((noreturn));
 void Reset_Handler(void) {
-	narray_init_memory();
-	narray_remap0(); // RAM run model: SRAM1 to 0x0, fetches go zero-wait
+	startup_init_memory();
+	startup_remap0(); // RAM run model: SRAM1 to 0x0, fetches go zero-wait
 	SCB.VTOR = (uint32_t)(uintptr_t)__vectors;
 	*(volatile uint32_t *)0xE000ED88 |= 0xfu << 20; // FPU: CP10/CP11 full access
 	SCB.SHCSR |= SCB_SHCSR_USGFAULTENA;             // route usage faults to our handler

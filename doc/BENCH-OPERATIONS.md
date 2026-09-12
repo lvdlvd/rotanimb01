@@ -38,8 +38,9 @@ verifies the DUT side.
   too — and costs all the RAM state above. Cycle deliberately, then
   re-establish, then log.
 - The DUT does not survive a warm reset while the harness SPI bus is
-  live (reproduced repeatedly). Keep the harness in mode 0 or reset it
-  first whenever the DUT boots or is flashed. DroneCAN traffic during
+  live (reproduced repeatedly). RESET THE HARNESS first whenever the DUT
+  boots or is flashed. Mode 0 is NOT an alternative — it does not quiet
+  the bus (see "Two facts to keep straight" below). DroneCAN traffic during
   boot is a separate bus and is harmless.
 - Flash order: harness first, then DUT. Never `mass_erase` the DUT — it
   wipes the parameter sectors; `program ... verify <addr>` erases only
@@ -48,7 +49,11 @@ verifies the DUT side.
   harness console still streams — the model is alive, only its USB is
   wedged. Do not reset the harness (kills the flight): `sudo bench
   usbreset -dev <the harness by-id path>` (Linux; a USBDEVFS_RESET on
-  the device node) re-enumerates it and the flight survives. On a Pi,
+  the device node) re-enumerates it and the flight survives. Note the
+  kernel gives the device a NEW `/dev/ttyACMn` on the way back (observed
+  ttyACM2 -> ttyACM10), so anything pinned to the bare node breaks while
+  the `by-id` symlink follows correctly — one more reason every tool here
+  takes a by-id path. On a Pi,
   493 "Undervoltage detected" events later
   turned out to be the cause of a whole evening of such wedges: give
   the host a proper supply before chasing USB bugs.
@@ -66,9 +71,16 @@ climb above ~3000 m, and read it back after every cycle.
 
 ## Resets and what they actually reset
 
-- `bench drive mode 0` then `mode 1` zeroes ALTITUDE. It does not zero
-  position (add `bench drive setpos 0 0`) and no FDM mode cycle resets
-  HEADING — psi carries over from the previous flight.
+- An FDM mode cycle (`mode 0` then `mode 1`) RESETS NOTHING. Not altitude,
+  not position, not heading: `mode` sets one flag (src/main.c, `fdm_mode =
+  p[0] & 1`) and only selects which source the heartbeat REPORTS. To zero
+  position use `bench drive setpos 0 0`; to zero everything including psi,
+  reset the harness over SWD.
+  **Beware the display:** in mode 0 the heartbeat prints the parked kinematic
+  model, so `h` and `psi` READ ZERO while the six-DOF state is preserved
+  underneath and keeps running. Measured: 487 m before the cycle, 370 m after
+  (still descending). Altitude looking zeroed in mode 0 is a display artefact,
+  not a reset.
 - A harness SWD reboot (openocd `reset run`) zeroes psi and everything
   else. That is the recipe for repeatable-heading departures. Check psi
   in the heartbeat before judging any takeoff.
@@ -118,17 +130,53 @@ reports a watchdog/hard-fault reset reason. Cycling the DUT does not
 clear it.
 
 Signature, on the harness console (`bench drive tail`): the `unexp`
-counter (unexpected register writes) climbing by thousands per second.
-Healthy is 0, permanently — the checkride report's acceptance
-condition. That is the SPI-slave engine having lost byte alignment
+counter (unexpected register writes) CLIMBING by thousands per second.
+The signature is the RATE, not the level. On a harness that has been
+freshly reset the healthy reading is a flat 0 — the checkride report's
+acceptance condition, and what you should see on a clean bring-up — but
+`unexp` is a running total that CLEARS ONLY ON A HARNESS REBOOT, so a bench
+that recovered from a desync earlier in the session sits at a large static
+value and is perfectly healthy. Do not read a big number as a fault; read
+whether it is MOVING between two heartbeats. That is the SPI-slave engine having lost byte alignment
 with the master; every command byte is misread, the replies are wrong,
 and the DUT's IMU driver hard-faults on them.
 
-Recovery is on the HARNESS, not the DUT: a DUT power cycle alone cannot
-clear it (do not spend an hour on the wrong device). Reset the harness
-(SWD/openocd, or a power cycle), then CONFIRM on the harness console
-that `unexp`/`stray`/`mid` have returned to zero and the per-device SPI
-frame counters are counting up from zero again. A re-enumeration alone
+Since release-1.2 the harness DETECTS this and resyncs itself: `desync N`
+appears on the heartbeat, `unexp` stops climbing within ~1.5 s, and SPI
+frames keep counting — a harness that has recovered is SERVING, not silent.
+**Read the counters as rates, not levels.** After a 1.2 recovery `unexp` is a
+HISTORICAL TOTAL that stays where the fault left it and `desync` is an EVENT
+COUNT; a large static `unexp` with a non-zero `desync` is a RECOVERED bench,
+not a broken one. Both clear only on a harness reboot. The live signal is
+whether they are MOVING.
+
+If the harness has resynced and the DUT is healthy, that is the whole
+recovery — reset nothing. **But a DUT that is already BOOT-LOOPING will not
+recover this way**, because it resets itself every couple of seconds and
+re-desyncs the slave on every pass; the harness resyncs, the DUT dies again,
+and the counters sit static while the DUT never comes up. Symptom:
+`serbridge` logging "serial lost (EOF), reopening" every ~2 s and `pwm 0 0 0 0`
+in the heartbeat. To break that loop you must HOLD THE DUT OFF THE BUS while
+you fix the harness — a plain reset is not enough, because the thing you are
+resetting is what keeps re-breaking it:
+
+```
+# 1. hold the DUT halted so it stops re-desyncing the slave
+openocd -f interface/stlink.cfg -c "adapter serial <DUT stlink>" \
+  -c "reset_config srst_only srst_nogate connect_assert_srst" \
+  -f target/stm32f7x.cfg -c init -c "reset halt" -c shutdown
+# 2. reset the harness
+openocd -f interface/stlink.cfg -c "adapter serial <harness stlink>" \
+  -f target/stm32g4x.cfg -c "init; reset run; exit"
+# 3. re-establish harness RAM state (section 6) WHILE THE DUT IS STILL HELD
+# 4. only now release the DUT, and wait ~50 s
+openocd -f interface/stlink.cfg -c "adapter serial <DUT stlink>" \
+  -c "reset_config srst_only srst_nogate connect_assert_srst" \
+  -f target/stm32f7x.cfg -c init -c "reset run" -c shutdown
+```
+
+Then CONFIRM on the harness console that `unexp`/`stray`/`mid` are zero and
+the per-device SPI frame counters are counting up from zero again. A re-enumeration alone
 is not recovery: the first reset attempt on record re-enumerated with
 the counters unchanged and the DUT kept looping. Only then let the DUT
 boot, re-establish the RAM-only state, and hold 30 minutes with the

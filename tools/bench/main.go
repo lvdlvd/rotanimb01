@@ -20,8 +20,9 @@
 //	bench usbreset  [-dev path]                        (Linux, root: USBDEVFS_RESET of a wedged CDC)
 //
 // Defaults: -c 127.0.0.1:5760 (SITL). The bench is the same port through
-// serbridge on the host the USB devices hang off (mDNS names don't resolve
-// from Go sockets on macOS — use the host's IP). Device defaults: drive.go.
+// serbridge on the host the USB devices hang off (an mDNS .local name works
+// from macOS; use the host's IP if your resolver does not). Device defaults:
+// drive.go.
 package main
 
 import (

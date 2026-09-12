@@ -68,6 +68,15 @@ more than one ST-Link on the host:
 make -C src flash OPENOCD_ADAPTER="-c 'adapter serial <serial>'"
 ```
 
+To find which serial is which, read them off the USB descriptors — both
+ST-Links enumerate under the same `/dev/serial/by-id/usb-STMicroelectronics_
+STM32_STLink_<serial>-if02` pattern, so record the two serials once and label
+them. **Do NOT use `st-info --probe` to tell them apart on a running bench:
+it connects over SWD and RESETS THE HARNESS, losing every RAM-only setting
+(FDM mode, PWM cal, engine model, noise scales) in one command.** If you have
+probed, assume the RAM state is gone and redo section 6 before trusting any
+reading.
+
 Done looks like: the breakout LED (PC13, active low) blinks, and the
 harness enumerates as a USB CDC device named `rotanimb01 hitl-harness`.
 On Linux it appears as
@@ -178,7 +187,13 @@ missions.go) is the authoritative staged set — it adds NAVL1_DAMPING
 autoland) alone; the parm file is the annotated record. Do one of the
 two before expecting any fly check to pass.
 
-Then sanity, all with the harness parked (`fdm 0g` or `fdm 1g`):
+Then sanity. **Do section 6 (harness init) FIRST if you have not already:**
+the IMU, baro and airspeed checks below pass in either FDM mode, but the GPS
+and EKF checks REQUIRE `bench drive mode 1` — the DroneCAN GPS feeder produces
+no fix until the six-DOF model is running, and the EKF never leaves "waiting
+for GPS config data". Measured on the bench: `fdm 0g` gives GPS_RAW_INT
+fix=0 sats=0 at lat/lon 0; `fdm 1g` gives fix=3 sats=12 at the origin, with
+nothing else changed.
 
 - RAW_IMU: accel ≈ (0, 0, -1000) mg, gyro ≈ 0.
 - SCALED_PRESSURE ≈ 1013.25 hPa / 15.0 °C.
@@ -203,11 +218,16 @@ bench drive mode 1          # six-DOF model on, parked on the gear
 bench drive setpos 0 0      # at the origin (a bare mode cycle does not reset position)
 bench drive cal             # PWM calibration, ArduPilot sign profile — RAM-ONLY
 bench drive engine 912      # naturally aspirated 100 hp (default); 915 = turbo, for high altitude
-bench drive tail 3          # read the heartbeat back: fdm 1g, cal echoed
+bench drive tail 3          # read the heartbeat back: fdm 1g
 ```
 
 All of this is RAM state: lost on every harness reboot, reflash or
-power cycle. Without the cal the elevator is inverted for ArduPilot —
+power cycle. Note what `tail` can and cannot confirm: it shows `fdm 1g`, psi,
+altitude and the counters, but **there is no cal readback** — PWM_CAL is
+write-only, and the `ctl` line is the post-lag surface deflection computed from
+the DUT's live PWM, so at neutral PWM it reads `a 0 e 0 r 0` whether or not the
+cal was ever sent. The first real evidence the cal took is the takeoff
+rotating; `bench fly` reports "NO ROTATION (overspeed on ground)" if it did not. Without the cal the elevator is inverted for ArduPilot —
 the aircraft never rotates, runs off the end of the runway at 50 m/s.
 Then `bench reboot` the DUT and wait 45 s (clears a latched
 "airspeed unhealthy").
@@ -222,19 +242,30 @@ bench fly -alt 300
 
 TAKEOFF-mode departure, climb, 60 s of hands-off FBWA at cruise
 throttle, PASS/MARGINAL verdict with roll statistics. PASS = worst |roll| and
-|pitch| both under 25° over the hands-off minute (a clean bench flies it at
-under 12°). It passes from
-clean state (roll ≤ 12°); a failure here means dirty harness state —
-re-run section 6 from a harness reset.
+|pitch| both under 25° over the hands-off minute. Typical numbers on a healthy
+bench land between about 7° and 17°, and which axis is the larger one varies
+run to run — **a figure over 12° is NOT by itself evidence of dirty harness
+state**, and chasing one with a reset is usually wasted time. A genuine FAIL
+(over 25°), or a takeoff that never rotates, does point at harness state: redo
+section 6 from a harness reset.
 
 The documented demo flight is the 1 km square at 150 m,
 `doc/example-square-1km.waypoints`, laid out from the feeder origin
-(south-west corner) north and east:
+(south-west corner) north and east. Item 0 of a QGC WPL file is the HOME slot
+and ArduPilot overwrites it with the vehicle's own home, so the real mission
+starts at item 1 — these files carry a placeholder home row for that reason.
+A mission whose NAV_TAKEOFF sits at index 0 loses it silently on upload and
+the aircraft then sits at idle throttle in AUTO, looking like a bench fault.
+Note also that AUTO alone does not start the ground roll without a throttle
+input; depart with `mode takeoff` (what `bench fly` does) and switch to AUTO
+once airborne:
 
 ```
 mavproxy> wp load doc/example-square-1km.waypoints
-mavproxy> mode auto
+mavproxy> mode takeoff
 mavproxy> arm throttle
+        # ... climbing; once through TKOFF_ALT:
+mavproxy> mode auto
 ```
 
 `doc/example-straight-in.waypoints` is the same with a landing at the

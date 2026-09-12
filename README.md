@@ -227,6 +227,20 @@ and the parm file comments. The ones that cost the most:
   covariance that matches. Velocity noise is white and small, as on a real
   doppler-derived fix. `bench drive noise` scales it, and the pitot's, along
   with the four emulated SPI sensors.
+- **Airspeed is quantised to 0.1 m/s before the pitot pressure is computed.**
+  The lag ring stores IAS as a u16 in 0.1 m/s units and RawAirData's
+  differential pressure is `0.5*rho*ias^2` from that, so the transmitted
+  pressure moves in steps of about 6 Pa at cruise — measured on the bench at
+  ~45 m/s: 20 distinct values spanning 113 Pa over a 120 s climb, a 5.97 Pa
+  step against 1.225*45*0.1 = 5.5 Pa predicted. Before the pitot noise existed
+  this made the emitted value bit-identical for up to 24 consecutive samples
+  (1.2 s at 20 Hz), which is a stuck-source pattern: PX4's `DataValidator`
+  invalidates a source after 100 identical samples, so the margin was 4x, and
+  a steady cruise leg holds IAS inside one bin longer than a climb does. The
+  noise layer removes the *symptom* — 0.5 Pa RMS is added after the
+  quantisation, so consecutive samples are never identical — but the 0.1 m/s
+  step itself remains, and anything that differentiates airspeed (TECS's rate
+  response, EKF airspeed fusion innovations) still sees it.
 - The spiral mode over-converges and the short period is overdamped
   with the default coefficients ([doc/FDM-TUNING.md](doc/FDM-TUNING.md) has the knobs).
 - tools/bench also speaks an experimental ArduPlane mode (HDGALT,

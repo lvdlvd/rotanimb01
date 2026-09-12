@@ -170,6 +170,21 @@ and the parm file comments. The ones that cost the most:
   912.** It cannot hold altitude above ~14,000 ft. High-altitude work
   needs `bench drive engine 915` (turbo), which is RAM-only too.
 
+## Known issues
+
+- **SPI slave desynchronisation (origin unlocated).** Rarely, the
+  slave engine loses byte alignment with the DUT's bus master; the
+  harness's `unexp` counter then climbs by thousands per second and
+  ArduPlane boot-loops on the corrupt IMU replies. Detector: the
+  counters (healthy = 0, always). Cure: reset the harness, confirm the
+  counters return to 0, then boot the DUT. What shifts the command byte
+  has not been found; see doc/BENCH-OPERATIONS.md.
+- The spiral mode over-converges and the short period is overdamped
+  with the default coefficients (doc/FDM-TUNING.md has the knobs).
+- Bootloader builds in ArduPilot share the board's build directory with
+  the application build; build the bootloader from a clean
+  `build/NucleoF767ZI` or the generated DroneCAN headers go missing.
+
 ## Licence
 
 MIT, see LICENSE. The autopilot patch series in `dut/` are contributions

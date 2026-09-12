@@ -108,6 +108,44 @@ recapture the altitude target). The air-start IAS must be within the
 trim envelope (≤ ~40 m/s) or `fdm_trim` fails silently and nothing
 moves.
 
+## The DUT boot loop: a desynchronised SPI slave
+
+Symptom: the DUT re-enumerates on USB every ~9 s, prints the ArduPlane
+banner, dies right after "BMI088: found gyro"; its next clean boot
+reports a watchdog/hard-fault reset reason. Cycling the DUT does not
+clear it.
+
+Signature, on the harness console (`bench drive tail`): the `unexp`
+counter (unexpected register writes) climbing by thousands per second.
+Healthy is 0, permanently — the checkride report's acceptance
+condition. That is the SPI-slave engine having lost byte alignment
+with the master; every command byte is misread, the replies are wrong,
+and the DUT's IMU driver hard-faults on them.
+
+Recovery is on the HARNESS, not the DUT: a DUT power cycle alone cannot
+clear it (do not spend an hour on the wrong device). Reset the harness
+(SWD/openocd, or a power cycle), then CONFIRM on the harness console
+that `unexp`/`stray`/`mid` have returned to zero and the per-device SPI
+frame counters are counting up from zero again. A re-enumeration alone
+is not recovery: the first reset attempt on record re-enumerated with
+the counters unchanged and the DUT kept looping. Only then let the DUT
+boot, re-establish the RAM-only state, and hold 30 minutes with the
+counters at 0 before trusting the bench.
+
+Two facts to keep straight, because both have misled people:
+
+- Harness mode 0 is the kinematic flight model, NOT an SPI-quiet state.
+  The register emulation runs in both modes from the moment the
+  harness boots; the only way to silence the bus is to reset or unpower
+  the harness.
+- `bench probe` is not read-only: it sends an FBWA mode command before
+  it records (so do `fly`, `loiter`, `tune`; only `watch` and `param`
+  reads are passive).
+
+What shifts the command byte in the first place has not been located.
+It is an open item (README, known issues); the counters are the
+detector.
+
 ## Airspeed and GPS feed facts
 
 - The harness sends RawAirData from the first instant of boot,

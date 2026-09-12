@@ -51,6 +51,17 @@ it run the FDM commands (mode, air-start, wind, PWM cal, parameters)
 and the 20 Hz TRUTH_* telemetry. `rb01tool` is the interactive cockpit;
 `tools/bench` drives unattended missions.
 
+![rb01tool's primary flight display: an ASCII airspeed tape on the left
+reading 26.7, an altitude tape on the right reading 75.6, a pitch ladder
+and horizon across the middle, a heading tape along the bottom reading
+316.3, and a status line with IAS, TAS, ALT, VSI, groundspeed and the
+control positions.](doc/rb01tool-pfd.png)
+
+*`rb01tool`'s PFD (`f` toggles it): the tapes, the compass and the
+horizon are drawn from the TRUTH_* stream — the attitude comes straight
+off the FDM's quaternion, not from the DUT's estimate, so this is what
+the aircraft is actually doing rather than what the autopilot believes.*
+
 ## What you need
 
 [![The bench wired up: a Raspberry Pi host at the top, the NUCLEO-F767ZI

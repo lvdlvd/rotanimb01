@@ -24,7 +24,7 @@ loiter legs identically to the meter ([doc/F5-TESTREPORT-2026-07-15.md](doc/F5-T
 ```
              ┌──────────────────── harness (G474) ────────────────────┐
              │                                                        │
-             │   fdm.c 1 kHz ──► truth ──► sensor models (noise,     │
+             │   fdm.c 1 kHz ──► truth ──► sensor models (noise,      │
              │   6-DOF light aircraft      quantization, bias walk)   │
              │        ▲                     │            │            │
              │        │                 SPI slaves    FDCAN3          │
@@ -40,7 +40,7 @@ loiter legs identically to the meter ([doc/F5-TESTREPORT-2026-07-15.md](doc/F5-T
              ┌────────┴───────────────────┴─┴────────────┴────────────┐
              │       DUT: stock ArduPlane or PX4, NUCLEO-F767ZI       │
              │       real drivers → EKF → TECS/L1 → servos            │
-             └─────────────────────────────────────────────────────────┘
+             └────────────────────────────────────────────────────────┘
 ```
 
 In the diagram, TECS and L1 are ArduPlane's energy (speed/height) and

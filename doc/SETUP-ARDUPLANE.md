@@ -39,19 +39,21 @@ you need both:
 - its **console** is USART1 PA9/PA10 at 115200. The once-a-second
   heartbeat (`fdm 1g`, altitude, psi, the post-lag surfaces, the PWM
   cal echo, the SPI counters) exists ONLY there, and `bench drive`
-  reads it back after every command. On the breakout board this
-  guide assumes, PA9/PA10 are wired to the ST-Link programmer's VCP
-  and appear as the ST-Link's second CDC interface. On a
-  NUCLEO-G474RE the on-board ST-Link VCP is on PA2/PA3 (USART2), not
-  USART1: wire a USB-serial adapter to PA9/PA10 and point
-  `ROTANIMB01_CONSOLE` at it. Also on a Nucleo: PC13 is the user
-  button, not an LED, and PA11/PA12 have no USB connector, so the
-  pseudocan link needs a hand-made USB cable; the selftest's jumper
-  set uses PA2/PA3 as chip selects, which collide with that VCP.
+  reads it back after every command. On the breakout board, PA9/PA10
+  go to the ST-Link's VCP pins and the console appears as the
+  ST-Link's second CDC interface.
+
+Untested alternative: a NUCLEO-G474RE has the same MCU and pinout, but
+its on-board ST-Link VCP is on PA2/PA3 (USART2), PC13 is the user
+button, and PA11/PA12 have no USB connector — so it would need a
+USB-serial adapter on PA9/PA10 (`ROTANIMB01_CONSOLE`), a hand-made USB
+cable, and the selftest's PA2/PA3 jumpers collide with that VCP. Nobody
+has run it; the breakout is the known-good board.
 
 ## 2. Build and flash the harness
 
-Toolchain: arm-none-eabi-gcc 14 or newer (the sources are `-std=gnu23`),
+Toolchain: arm-none-eabi-gcc 15.2 (what this is built and tested with; the
+sources are `-std=gnu23`, older compilers are untested),
 GNU make, openocd. The harness build needs nothing outside this repository.
 
 ```
@@ -140,8 +142,8 @@ Go 1.21 or newer, standard library only (bench needs golang.org/x/sys
 for termios, fetched by `go build`). `rb01tool -p <port>` names the
 harness pseudocan port; without `-p` it looks for exactly one
 `/dev/serial/by-id/usb-rotanimb01_hitl-harness_*` (Linux) or
-`/dev/cu.usbmodem*` (macOS). tools/px4hil is Go 1.25 and fetches one
-MAVLink module from the network.
+`/dev/cu.usbmodem*` (macOS). tools/px4hil is Go 1.25 and depends on
+github.com/lvdlvd/gomavlink (fetched by `go build`).
 
 If the USB devices hang off a separate host (a Pi), run there:
 

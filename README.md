@@ -48,22 +48,23 @@ drives unattended missions.
 
 ## What you need
 
-- **Harness**: an STM32G474RET6. The guides assume a generic 64-pin
-  breakout (LED on PC13 active-low, USB on PA11/PA12, an external
-  ST-Link whose VCP is wired to USART1 PA9/PA10 as the console). A
-  NUCLEO-G474RE works with three adaptations spelled out in
-  doc/SETUP-ARDUPLANE.md section 1 (console via a USB-serial adapter
-  on PA9/PA10, a hand-made USB cable, no LED). Flashed over SWD with
-  openocd.
+- **Harness**: a cheap generic 64-pin STM32G474RET6 breakout board
+  (the kind sold online for a few euros: LED on PC13 active-low, USB
+  connector on PA11/PA12, SWD header) plus an ST-Link whose VCP is
+  wired to USART1 PA9/PA10 as the console. That is the board this was
+  developed and tested on. A NUCLEO-G474RE has the same MCU and pins
+  but was not tested; doc/SETUP-ARDUPLANE.md section 1 lists what
+  would differ. Flashed over SWD with openocd.
 - **DUT**: a NUCLEO-F767ZI. Board definitions for both autopilots ship
   in `dut/` as patch series against upstream.
 - Two 5 V CAN transceivers (TJA1051 or similar) and a handful of jumper
   wires; a USB hub with per-port power control (uhubctl) is a real
   quality-of-life item, see doc/BENCH-OPERATIONS.md.
 - A host for the USB side: any Linux box (a Raspberry Pi works well) or
-  the workstation directly. Toolchains: arm-none-eabi-gcc 14+ for the
-  harness (`-std=gnu23`), Go 1.21+ for rb01tool and tools/bench (Go
-  1.25+ and one network-fetched MAVLink module for tools/px4hil), the
+  the workstation directly. Toolchains: arm-none-eabi-gcc 15.2 for the
+  harness (what it is built and tested with; `-std=gnu23`), Go 1.21+ for
+  rb01tool and tools/bench (Go
+  1.25+ and github.com/lvdlvd/gomavlink for tools/px4hil), the
   autopilot's own toolchain for the DUT.
 
 ## Start here

@@ -141,7 +141,7 @@ stream.
 
 `tools/px4hil` wraps the same `fdm.c` as a PX4 simulator (HIL_SENSOR +
 HIL_GPS out, HIL_ACTUATOR_CONTROLS in, lockstep). It needs Go 1.25 and
-fetches one MAVLink module from the network on first build. The
+depends on github.com/lvdlvd/gomavlink (fetched by `go build`). The
 matching SITL airframe (output map 0 ail, 1 ele, 2 rud, 3 thr — NOT the
 bench board's) is `dut/px4/sitl/0001-*.patch`, applied the same way as
 the board patches:

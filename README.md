@@ -1,4 +1,4 @@
-# rotanimb01 — a hardware-in-the-loop (HITL) flight bench for stock ArduPlane and PX4
+# rotanimb01 — a HITL flight bench for ArduPlane and PX4
 
 One STM32G474 (the **harness**) impersonates a flight controller's whole
 sensor suite — BMI088 gyro+accel, BMP390 baro, RM3100 magnetometer — at
@@ -10,7 +10,7 @@ Kitfox Model V light aircraft at 1 kHz to close the loop. A stock
 ArduPlane or PX4 build on a NUCLEO-F767ZI (the DUT) boots against it,
 probes "real" sensors, calibrates, arms, takes off and flies — its real
 drivers, its real Extended Kalman Filter (EKF), its real control loops,
-none the wiser.
+none the wiser for a hardware-in-the-loop test bench.
 
 The same FDM also flies as an ArduPilot Software-In-The-Loop (**SITL**)
 backend and as a PX4 SITL simulator on the workstation, so tuning

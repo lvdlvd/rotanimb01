@@ -1,7 +1,8 @@
 # rotanimb01 — a HITL flight bench for ArduPlane and PX4
 
 One STM32G474 (the **harness**) impersonates a flight controller's whole
-sensor suite — BMI088 gyro+accel, BMP390 baro, RM3100 magnetometer — at
+sensor suite — [BMI088](doc/BMI088.pdf) gyro+accel,
+[BMP390](doc/BMP390.pdf) baro, [RM3100](doc/RM3100.pdf) magnetometer — at
 the register level of the **SPI** (Serial Peripheral Interface) bus of
 the device under test (the **DUT**), feeds it GPS and airspeed over
 DroneCAN, captures its eight servo PWM (pulse-width modulation) outputs,
@@ -132,6 +133,10 @@ two CAN transceivers and jumper wires.](doc/hitl-small.jpg)](doc/hitl.png)
 - **[doc/F5-TESTREPORT-2026-07-15.md](doc/F5-TESTREPORT-2026-07-15.md)** — the multi-night checkride
   report: 17+ defects found and fixed (the point of HITL), transition
   matrix, tuning campaign, final PASS numbers.
+- **[doc/BMI088.pdf](doc/BMI088.pdf)**, **[doc/BMP390.pdf](doc/BMP390.pdf)**,
+  **[doc/RM3100.pdf](doc/RM3100.pdf)** — the three datasheets the register
+  models were built from (rev 1.3, rev 1.7, user manual V9.0). Copyright
+  their manufacturers; see LICENSE.
 - **doc/f5-bench.parm** — the ArduPlane parameter file, heavily
   annotated with every ArduPilot trap the bench discovered.
 - **src/canmsg.h** — the as-built pseudocan dictionary (commands in,

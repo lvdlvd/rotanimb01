@@ -1,8 +1,9 @@
 # M4 register maps — extracted for verification
 
-Sources: BMI088 datasheet rev 1.3 (§5.2/5.4 maps + §5.3/5.5 descriptions),
-BMP390 datasheet rev 1.7 (Table 25 + §4.3, trim Table 24), RM3100 user
-manual V9.0 (Table 5-1 + §5.x). Cross-checked against the hand-extracted
+Sources, all three in this directory: [BMI088 datasheet rev 1.3](BMI088.pdf)
+(§5.2/5.4 maps + §5.3/5.5 descriptions), [BMP390 datasheet rev
+1.7](BMP390.pdf) (Table 25 + §4.3, trim Table 24), [RM3100 user manual
+V9.0](RM3100.pdf) (Table 5-1 + §5.x). Cross-checked against the hand-extracted
 driver headers of an in-house flight controller that masters the real parts.
 
 Access column = what the emulation lets the DUT write (the wmask); "hook"

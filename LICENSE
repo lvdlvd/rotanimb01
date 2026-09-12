@@ -25,3 +25,10 @@ SOFTWARE.
 src/nlib/tprintf.c and src/nlib/tprintf.h are derived from Marco Paland's
 printf (https://github.com/mpaland/printf), MIT License, copyright (c)
 2014-2019 Marco Paland; the notice is preserved in those files.
+
+doc/BMI088.pdf and doc/BMP390.pdf are Bosch Sensortec datasheets, copyright
+(c) Robert Bosch GmbH; doc/RM3100.pdf is the RM3100/RM2100 Sensor Suite User
+Manual, copyright (c) PNI Sensor Corporation. They are included unmodified as
+the reference the register models were built against. They are the property of
+their respective manufacturers, are NOT covered by the MIT grant above, and no
+licence to them is granted or implied by this repository.

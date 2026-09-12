@@ -30,10 +30,10 @@ One G474 impersonates the core sensor suite of an ArduPlane flight
 controller (the DUT) at the *register level*, over the DUT's own sensor
 SPI bus:
 
-- **BMI088** — two logical SPI devices on one package: accel (own CS,
-  own INT1) and gyro (own CS, own INT3).
-- **BMP390** barometer (CS + INT).
-- **RM3100** magnetometer (CS + DRDY).
+- **[BMI088](BMI088.pdf)** — two logical SPI devices on one package: accel
+  (own CS, own INT1) and gyro (own CS, own INT3).
+- **[BMP390](BMP390.pdf)** barometer (CS + INT).
+- **[RM3100](RM3100.pdf)** magnetometer (CS + DRDY).
 
 Four chip selects, four data-ready outputs, one shared SCK/MOSI/MISO on
 the DUT side — the harness is the *slave* on all of them.

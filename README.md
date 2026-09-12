@@ -191,6 +191,11 @@ and the parm file comments. The ones that cost the most:
   level control. The dictionary entry is reserved for that.
 - The spiral mode over-converges and the short period is overdamped
   with the default coefficients (doc/FDM-TUNING.md has the knobs).
+- tools/bench also speaks an experimental ArduPlane mode (HDGALT,
+  `bench mode hdgalt` / `bench hdgaltcmd`) that exists only in a public
+  fork, branch `hdgaltmode` of https://github.com/lvdlvd/ardupilot, with
+  zero warranties. Nothing in this repository needs it; on stock
+  ArduPlane those two commands are rejected. See tools/bench/README.md.
 - Bootloader builds in ArduPilot share the board's build directory with
   the application build; build the bootloader from a clean
   `build/NucleoF767ZI` or the generated DroneCAN headers go missing.

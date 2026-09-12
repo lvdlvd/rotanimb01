@@ -28,6 +28,8 @@ Against the DUT (MAVLink over TCP, `-c addr`, default `127.0.0.1:5760`):
     bench watch     [-c addr] [-dur 30s]
     bench disarm    [-c addr]                           (force)
     bench reboot    [-c addr]
+    bench mode      [-c addr] hdgalt                    (experimental fork mode, below)
+    bench hdgaltcmd [-c addr] [-hdg deg] [-trate deg/s] [-alt m] [-crate m/s]
 
 On the bench host, next to the USB devices:
 
@@ -67,6 +69,18 @@ sockets on macOS). Device defaults for `drive`/`serbridge`/`usbreset`:
   console for the readback; reference in doc/BENCH-OPERATIONS.md.
 - **usbreset** re-enumerates a wedged CDC device without resetting the
   firmware (USBDEVFS_RESET; doc/BENCH-OPERATIONS.md).
+
+## HDGALT: an experimental ArduPlane mode (not needed for anything here)
+
+`bench mode hdgalt` and `bench hdgaltcmd` drive a heading-and-altitude
+hold mode that is NOT in stock ArduPlane. It is an experimental patch
+living in a public fork, branch `hdgaltmode` of
+https://github.com/lvdlvd/ardupilot — flight mode number 27 and the
+HDGALT_COMMAND message (id 52100) from that fork's `hdgalt_dev.xml`
+dialect, hand-encoded in mavlink.go. It comes with zero warranties and
+is not required to use this bench: every guide, mission and check in
+this repository runs on stock ArduPlane. Against a stock build the two
+commands are simply rejected (unknown mode / unknown message).
 
 ## SITL rig quickstart
 

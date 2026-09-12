@@ -13,6 +13,8 @@
 //	bench disarm    [-c addr]        (force)
 //	bench reboot    [-c addr]
 //	bench watch     [-c addr] [-dur 2m]
+//	bench mode      [-c addr] hdgalt                 (experimental fork mode, README)
+//	bench hdgaltcmd [-c addr] [-hdg -trate -alt -crate]
 //	bench drive     <mode|airstart|setpos|gps|wind|engine|param|cal|tail> [args]   (on the bench host)
 //	bench serbridge [-dev path] [-port 5760]                                 (on the bench host)
 //	bench usbreset  [-dev path]                        (Linux, root: USBDEVFS_RESET of a wedged CDC)

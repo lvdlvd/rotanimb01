@@ -21,7 +21,9 @@ const (
 	ModeRTL      = 11
 	ModeLoiter   = 12
 	ModeTakeoff  = 13
-	ModeHdgAlt   = 27 // hdgalt_dev.xml PLANE_MODE_HDGALT
+	ModeHdgAlt   = 27 // PLANE_MODE_HDGALT: experimental, NOT stock ArduPlane — branch
+	// hdgaltmode of https://github.com/lvdlvd/ardupilot (hdgalt_dev.xml), no
+	// warranty; nothing in this repository needs it (README)
 
 	cmdArmDisarm          = 400
 	cmdRebootShutdown     = 246

@@ -713,7 +713,7 @@ void Reset_Handler(void) {
 		uint32_t change_us; // last time count advanced
 	} chan[8] = {0};
 
-	uint32_t unexp_last = 0, desyncs = 0;
+	uint32_t unexp_last = 0, desyncs = 0, t_resync = 0, desync_windows = 0;
 	bool desync = false;
 	uint32_t t_pwm = now_us(), t_status = t_pwm, t_diag = t_pwm, t_tick = t_pwm, t_truth = t_pwm,
 			 t_gpsfeed = t_pwm, t_airfeed = t_pwm, t_nodest = t_pwm;
@@ -943,11 +943,12 @@ void Reset_Handler(void) {
 			// refused by the write mask, which is exactly what a shifted
 			// command byte produces, and a healthy bus sits at a hard zero
 			// indefinitely. Measured: healthy 0, desynced ~1800 per 100 ms.
-			// DETECTION ONLY. An in-place re-arm of the engine was tried here
-			// and DOES NOT WORK: bench-tested 2026-09-12, the resync fired
-			// once a second for 40 s while unexp climbed past 1.6 M unabated.
-			// The cure remains a DUT reset followed by a harness reset ~2 s
-			// later. See the README known issue.
+			// On detection, re-arm the sensor layer (sensors_bus_resync:
+			// register files to power-on defaults AND the engine, which is
+			// what the harness-reboot cure does). An earlier attempt that
+			// re-armed only the ENGINE had no effect at all — see the comment
+			// there. The harness's other RAM state is untouched, so a resync
+			// costs a few frames where a reboot costs a re-stage.
 			uint32_t unexp_now = sensors_unexpected();
 			uint32_t unexp_rate = unexp_now - unexp_last;
 			unexp_last = unexp_now;
@@ -956,8 +957,22 @@ void Reset_Handler(void) {
 					desyncs++; // rising edge: count events, not windows
 				}
 				desync = true;
+				// PERSISTENCE GUARD. The resync resets the emulated register
+				// files, which is right after a DUT reset (the DUT re-inits
+				// and expects defaults) and WRONG under a live DUT that never
+				// reset — it would wipe a flying aircraft's sensor
+				// configuration. The detector proves MIS-DECODING, not a DUT
+				// restart, so require the fault to persist: a real desync runs
+				// continuously (~1800 per 100 ms, indefinitely), while a
+				// transient glitch cannot hold for half a second.
+				if (++desync_windows >= 5 && now - t_resync > 1000000) {
+					t_resync = now;
+					sensors_bus_resync();
+					unexp_last = sensors_unexpected();
+				}
 			} else if (unexp_rate == 0) {
 				desync = false; // quiet again
+				desync_windows = 0;
 			}
 
 			bool stale = cmd_state.seq == 0 || now - cmd_state.rx_us > 1000000;

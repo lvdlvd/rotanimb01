@@ -59,4 +59,6 @@ bool baro_commit(float t_degc, double p_pa, uint32_t now_us); // raw words via b
 
 // SPI-slave desync: refused writes + stray/midframe, healthy is a hard zero
 uint32_t sensors_unexpected(void);
+// re-arm after a desync: register files to defaults + engine, as at boot
+void sensors_bus_resync(void);
 bool mag_commit(const int32_t xyz[3], uint32_t now_us);       // 24-bit signed per axis

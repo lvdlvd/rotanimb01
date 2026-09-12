@@ -227,20 +227,35 @@ and the parm file comments. The ones that cost the most:
   the **DUT first, then the harness ~2 s later**, then `drive mode 1`; the
   reverse order leaves the harness desynchronised, because the DUT's reset is
   what corrupts it.
-  The harness now **detects this itself**: a 10 Hz watchdog watches the
-  refused-write rate (healthy is a hard zero; a desync runs ~1800 per 100 ms),
-  raises **bit 6 of the STATUS flags** so a host sees it on the CAN link
-  rather than by scraping the console, and counts events as `desync N` on the
-  heartbeat. **Detection only — there is no automatic recovery, and not for
-  want of trying.** Re-arming the engine in place (an RCC pulse to flush the
-  TXFIFO, then re-running `spislave_init` to clear the FSM, reload the DMA
-  channel and re-queue the byte-0 fill, leaving the emulated register files
-  intact) was implemented and **bench-tested on 2026-09-12: it does not
-  work.** The resync fired once a second for 40 s while `unexp` climbed past
-  1.6 M unabated, so whatever the desynchronised state is, it is not cleared
-  by re-initialising the slave peripheral. That negative result is recorded
-  here so the next person does not spend the day rediscovering it. The cure
-  remains a DUT reset followed by a harness reset ~2 s later. See
+  **The harness now detects this and recovers its own side of it.** A 10 Hz
+  watchdog watches the refused-write rate (healthy is a hard zero; a desync
+  runs ~1800 per 100 ms), raises **bit 6 of the STATUS flags** so a host sees
+  it on the CAN link rather than by scraping the console, counts events as
+  `desync N` on the heartbeat, and re-arms the sensor layer in place.
+  **What the recovery has to reset is the interesting part.** A first attempt
+  re-armed only the slave *engine* — RCC pulse, then `spislave_init` — and
+  deliberately left the emulated register files alone to preserve the DUT's
+  configuration. Bench-tested, it had *no effect whatsoever*: it fired once a
+  second for 40 s while `unexp` climbed past 1.6 M. The reason is
+  by-construction. The known trigger is a DUT reset, after which the DUT
+  re-runs its sensor init from scratch and expects **power-on defaults**,
+  while the harness still held the pre-reset configuration — a protocol-state
+  mismatch that no amount of resetting the SPI peripheral can fix. The working
+  resync does what a cold boot does to the sensor layer: register files *and*
+  engine. Measured: `unexp` stops dead within ~1.5 s and never moves again,
+  while SPI traffic continues at the normal rate.
+  **The DUT still needs its own reset** — it wedges in sensor init during the
+  second or so before the harness recovers, and does not retry. So the
+  procedure is now **reset the DUT only**: the harness heals itself and keeps
+  its RAM-only state (PWM calibration, engine model, noise scales), where
+  previously a harness reboot lost all of it and cost a re-stage. Verified by
+  setting the noise scales to 4x, provoking a desync, and reading them back
+  unchanged after recovery.
+  **Caveat, deliberate:** the watchdog proves *mis-decoding*, not that the DUT
+  restarted, and the wide resync would discard a live DUT's configuration. It
+  is therefore gated on the fault persisting for 500 ms — a real desync runs
+  continuously, a transient cannot hold that long. The origin of the rare
+  non-reset desyncs is still unlocated. See
   [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md).
 - **GPS error is correlated, not white**, so it does not average away: the
   feeder adds a first-order Gauss-Markov position error (1 m horizontal, 2 m

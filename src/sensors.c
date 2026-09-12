@@ -409,6 +409,54 @@ uint32_t sensors_unexpected(void) {
 	       mag_dev.unexpected + sensor_bus.stray + sensor_bus.midframe;
 }
 
+// Re-arm the bus after a desync. The FIRST attempt at this re-initialised
+// only the slave engine and deliberately left devs[] alone, to keep the DUT's
+// configuration; bench-tested 2026-09-12, it had NO effect at all (the resync
+// fired 29 times in 40 s while unexp climbed past 1.6 M). The reason is
+// by-construction: the desync's known trigger is a DUT RESET, after which the
+// DUT re-runs its sensor init from scratch and expects POWER-ON DEFAULTS,
+// while the harness still held the pre-reset register configuration. So the
+// resync now does exactly what a cold boot does to the sensor layer —
+// register files AND engine — which is what the harness reboot cure does and
+// why that works.
+//
+// CAVEAT: for a desync whose trigger was NOT a DUT reset, this discards a
+// running DUT's configuration (ODR, ranges, FIFO setup), and its driver will
+// not re-read it until its own next init. That is the right trade for the
+// known trigger and the wrong one for a spontaneous desync; the origin of
+// those is still unlocated.
+//
+// Deliberately NOT touched: the PWM calibration, engine model and noise
+// scales live outside this layer, so a resync keeps them where a harness
+// reboot loses them.
+void sensors_bus_resync(void) {
+	// the engine's state is mutated by SPI3 (byte-0 decode) and the four CS
+	// EXTIs, all priority group 0; this runs at thread level
+	nvic_disable(SPI3_IRQn);
+	nvic_disable(EXTI0_IRQn);
+	nvic_disable(EXTI1_IRQn);
+	nvic_disable(EXTI2_IRQn);
+	nvic_disable(EXTI3_IRQn);
+
+	// an RCC reset pulse is the only way to flush the TXFIFO on this IP
+	RCC.APB1RSTR1 |= RCC_APB1RSTR1_SPI3RST;
+	RCC.APB1RSTR1 &= ~RCC_APB1RSTR1_SPI3RST;
+
+	sensors_init(); // register files to power-on defaults, then the engine
+
+	nvic_clear_pending(SPI3_IRQn);
+	nvic_clear_pending(EXTI0_IRQn);
+	nvic_clear_pending(EXTI1_IRQn);
+	nvic_clear_pending(EXTI2_IRQn);
+	nvic_clear_pending(EXTI3_IRQn);
+
+	nvic_enable(SPI3_IRQn);
+	nvic_enable(EXTI0_IRQn);
+	nvic_enable(EXTI1_IRQn);
+	nvic_enable(EXTI2_IRQn);
+	nvic_enable(EXTI3_IRQn);
+}
+
 void sensors_poll(uint32_t now_us) {
 	if (accel_reset_req) {
 		accel_reset_req = false;

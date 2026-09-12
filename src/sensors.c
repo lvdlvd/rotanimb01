@@ -409,47 +409,6 @@ uint32_t sensors_unexpected(void) {
 	       mag_dev.unexpected + sensor_bus.stray + sensor_bus.midframe;
 }
 
-// Re-arm the engine WITHOUT disturbing the emulated register files: the DUT's
-// configuration writes, FIFO contents and calibration all survive, so a
-// resync costs a few frames instead of the harness's entire RAM state. That
-// is the point — the previous cure was a harness reboot, which loses the PWM
-// calibration, the engine model and the noise scales, and on a staged bench
-// costs the better part of an hour to rebuild.
-void sensors_bus_resync(void) {
-	// The engine's state is mutated by SPI3 (byte-0 decode) and the four CS
-	// EXTIs, all in priority group 0. Mask them: this runs at thread level.
-	nvic_disable(SPI3_IRQn);
-	nvic_disable(EXTI0_IRQn);
-	nvic_disable(EXTI1_IRQn);
-	nvic_disable(EXTI2_IRQn);
-	nvic_disable(EXTI3_IRQn);
-
-	// An RCC reset pulse is the only way to flush the TXFIFO on this IP
-	// (RM0440: the RXFIFO survives SPE=0 and the TXFIFO is unflushable
-	// otherwise) — the same scrub the engine does at end of frame.
-	RCC.APB1RSTR1 |= RCC_APB1RSTR1_SPI3RST;
-	RCC.APB1RSTR1 &= ~RCC_APB1RSTR1_SPI3RST;
-
-	// re-init clears active/phase, re-resolves the DMA channel and re-queues
-	// the byte-0 fill; it does not touch devs[], so the register files stand
-	spislave_init(&sensor_bus, 0 /* mode 0 */, false /* SSM, CS demux */,
-	              &RCC.APB1RSTR1, RCC_APB1RSTR1_SPI3RST);
-
-	// drop anything that arrived while we were masked: it belongs to the
-	// frame we just abandoned
-	nvic_clear_pending(SPI3_IRQn);
-	nvic_clear_pending(EXTI0_IRQn);
-	nvic_clear_pending(EXTI1_IRQn);
-	nvic_clear_pending(EXTI2_IRQn);
-	nvic_clear_pending(EXTI3_IRQn);
-
-	nvic_enable(SPI3_IRQn);
-	nvic_enable(EXTI0_IRQn);
-	nvic_enable(EXTI1_IRQn);
-	nvic_enable(EXTI2_IRQn);
-	nvic_enable(EXTI3_IRQn);
-}
-
 void sensors_poll(uint32_t now_us) {
 	if (accel_reset_req) {
 		accel_reset_req = false;

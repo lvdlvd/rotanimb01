@@ -713,7 +713,7 @@ void Reset_Handler(void) {
 		uint32_t change_us; // last time count advanced
 	} chan[8] = {0};
 
-	uint32_t unexp_last = 0, t_resync = 0, resyncs = 0;
+	uint32_t unexp_last = 0, desyncs = 0;
 	bool desync = false;
 	uint32_t t_pwm = now_us(), t_status = t_pwm, t_diag = t_pwm, t_tick = t_pwm, t_truth = t_pwm,
 			 t_gpsfeed = t_pwm, t_airfeed = t_pwm, t_nodest = t_pwm;
@@ -943,21 +943,19 @@ void Reset_Handler(void) {
 			// refused by the write mask, which is exactly what a shifted
 			// command byte produces, and a healthy bus sits at a hard zero
 			// indefinitely. Measured: healthy 0, desynced ~1800 per 100 ms.
-			// This does NOT fix the desync — the origin is still unlocated —
-			// it detects it and re-arms the engine in place, which costs a few
-			// frames instead of the harness reboot that loses every RAM-only
-			// setting (PWM cal, engine model, noise scales).
+			// DETECTION ONLY. An in-place re-arm of the engine was tried here
+			// and DOES NOT WORK: bench-tested 2026-09-12, the resync fired
+			// once a second for 40 s while unexp climbed past 1.6 M unabated.
+			// The cure remains a DUT reset followed by a harness reset ~2 s
+			// later. See the README known issue.
 			uint32_t unexp_now = sensors_unexpected();
 			uint32_t unexp_rate = unexp_now - unexp_last;
 			unexp_last = unexp_now;
 			if (unexp_rate > 8) { // far above healthy-zero, far below a fault
-				desync = true;
-				if (now - t_resync > 1000000) { // at most once a second
-					t_resync = now;
-					resyncs++;
-					sensors_bus_resync();
-					unexp_last = sensors_unexpected();
+				if (!desync) {
+					desyncs++; // rising edge: count events, not windows
 				}
+				desync = true;
 			} else if (unexp_rate == 0) {
 				desync = false; // quiet again
 			}
@@ -1003,7 +1001,7 @@ void Reset_Handler(void) {
 			const struct PhysicsTruth *pt = truth();
 			uint32_t pc = phys_cycles_max;
 			phys_cycles_max = 0;
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u resync %u cmd seq %u nz %u/%u/%u/%u/%u/%u/%u ",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u desync %u cmd seq %u nz %u/%u/%u/%u/%u/%u/%u ",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
 			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
 			        (unsigned)pt->p_pa, (unsigned)fdm_mode,
@@ -1011,7 +1009,7 @@ void Reset_Handler(void) {
 			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
-			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)resyncs,
+			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)desyncs,
 			        (unsigned)cmd_state.seq,
 			        nz_gyro, nz_accel, nz_mag, nz_baro, nz_bias, nz_pitot, nz_gps);
 			tprintf("gps tx %u bo %u lec %u/%u/%u/%u/%u/%u/%u ",

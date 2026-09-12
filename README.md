@@ -227,15 +227,20 @@ and the parm file comments. The ones that cost the most:
   the **DUT first, then the harness ~2 s later**, then `drive mode 1`; the
   reverse order leaves the harness desynchronised, because the DUT's reset is
   what corrupts it.
-  Since 1.2 the harness **detects this itself and re-arms the engine in
-  place**: the 10 Hz watchdog watches the refused-write rate (healthy is a
-  hard zero; a desync runs ~1800 per 100 ms), raises **bit 6 of the STATUS
-  flags**, and calls a resync at most once a second, counting them as
-  `resync N` on the console heartbeat. The resync keeps the emulated register
-  files, so the DUT's configuration survives and the harness's RAM-only state
-  (PWM calibration, engine model, noise scales) is not lost the way a reboot
-  loses it. **This does not fix the desync** — the origin is still unlocated —
-  it shortens the recovery from a reboot-and-restage to a few frames. See
+  The harness now **detects this itself**: a 10 Hz watchdog watches the
+  refused-write rate (healthy is a hard zero; a desync runs ~1800 per 100 ms),
+  raises **bit 6 of the STATUS flags** so a host sees it on the CAN link
+  rather than by scraping the console, and counts events as `desync N` on the
+  heartbeat. **Detection only — there is no automatic recovery, and not for
+  want of trying.** Re-arming the engine in place (an RCC pulse to flush the
+  TXFIFO, then re-running `spislave_init` to clear the FSM, reload the DMA
+  channel and re-queue the byte-0 fill, leaving the emulated register files
+  intact) was implemented and **bench-tested on 2026-09-12: it does not
+  work.** The resync fired once a second for 40 s while `unexp` climbed past
+  1.6 M unabated, so whatever the desynchronised state is, it is not cleared
+  by re-initialising the slave peripheral. That negative result is recorded
+  here so the next person does not spend the day rediscovering it. The cure
+  remains a DUT reset followed by a harness reset ~2 s later. See
   [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md).
 - **GPS error is correlated, not white**, so it does not average away: the
   feeder adds a first-order Gauss-Markov position error (1 m horizontal, 2 m

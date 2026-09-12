@@ -184,6 +184,10 @@ and the parm file comments. The ones that cost the most:
   counters (healthy = 0, always). Cure: reset the harness, confirm the
   counters return to 0, then boot the DUT. What shifts the command byte
   has not been found; see doc/BENCH-OPERATIONS.md.
+- **CMD_NOISE (0x42) is accepted but not implemented.** The harness stores
+  the frame and never reads it: the sensor noise and gyro bias walk are
+  compiled-in constants (src/main.c, `noise()`), with no runtime mask or
+  level control. The dictionary entry is reserved for that.
 - The spiral mode over-converges and the short period is overdamped
   with the default coefficients (doc/FDM-TUNING.md has the knobs).
 - Bootloader builds in ArduPilot share the board's build directory with

@@ -53,6 +53,12 @@ and the 20 Hz TRUTH_* telemetry. `rb01tool` is the interactive cockpit;
 
 ## What you need
 
+[![The bench wired up: a Raspberry Pi host at the top, the NUCLEO-F767ZI
+DUT and the STM32G474 harness breakout on breadboards below it, joined by
+two CAN transceivers and jumper wires.](doc/hitl-small.jpg)](doc/hitl.png)
+
+*The bench. Full resolution: doc/hitl.png.*
+
 - **Harness**: a cheap generic 64-pin STM32G474RET6 breakout board
   (the kind sold online for a few euros: LED on PC13 active-low, USB
   connector on PA11/PA12, SWD debug header) plus an ST-Link debug probe

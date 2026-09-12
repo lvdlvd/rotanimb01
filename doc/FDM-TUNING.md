@@ -20,7 +20,7 @@ nosewheel washout, brakes below 15% power, crash-repark), the servo lag
 (τ 60 ms, 300°/s rate limit, throttle τ 0.3 s — controls.c), and the
 sensor noise levels (src/main.c, `noise()`: gyro 0.2°/s white + a
 per-boot bias and a random walk, accel 5 mg, mag 20 nT, baro ±1 Pa
-dither). The noise is always on at those levels; CMD_NOISE 0x42 scales
+dither, pitot 0.5 Pa, GPS 1 m/2 m correlated over 60 s). The noise is always on at those levels; CMD_NOISE 0x42 scales
 them at runtime (`bench drive noise`, RAM only, baro floored at 1.0×)
 but the levels themselves stay compiled in — see "Sensor-side fidelity
 knobs" below.
@@ -138,7 +138,7 @@ not zero.
 
 - Noise and bias walk: the *levels* are constants in `src/main.c` (search
   `noise(`); CMD_NOISE 0x42 scales them at runtime, `drive noise
-  default|off|<g> <a> <m> <b> [bias] [redraw|zero]`, RAM only. Do not be
+  default|off|<g> <a> <m> <b> [bias] [pitot] [gps] [redraw|zero]`, RAM only. Do not be
   tempted to run the bench quiet: bit-identical pressure trips ArduPilot's
   stuck-baro detector (PX4's `DataValidator` calls a source stale after 100
   identical samples), and a noise-free bench let a DCM-drift bug hide for
@@ -153,6 +153,19 @@ not zero.
   reach ±1.4 Pa instead of a hard ±1. Altitude effect is a few cm.
 - GPS lag: `drive gps 1 <ms>` (default 150 — a zero-lag GPS makes HITL
   kinder than reality).
+- GPS and pitot error (`main.c`, the `GPS_*`/`PITOT_*` nominals; scaled by
+  CMD_NOISE bytes 6-7). The position error is first-order Gauss-Markov —
+  1 m horizontal, 2 m vertical, 60 s time constant — because real GNSS
+  error is slowly correlated (ionosphere, multipath, orbit, clock) and an
+  EKF filters white jitter away almost for free. A white model would make
+  the bench kinder than reality in exactly the place a navigation filter is
+  supposed to earn its keep. Velocity is doppler-derived and stays white at
+  0.05 m/s. The advertised Fix2 covariance tracks the active sigma, floored
+  at what the feed claimed before it had any error at all: a filter handed a
+  covariance smaller than the true error is being lied to in the direction
+  that makes it overconfident. Pitot differential pressure gets 0.5 Pa RMS,
+  which also stops a parked aircraft sending a bit-identical 0.0 Pa forever
+  — the stuck-source pattern PX4's DataValidator rejects.
 - Sensor rates and ranges follow the DUT's own configuration writes
   (the register models honour ACC_CONF/GYRO_BANDWIDTH/ODR/TMRC), so
   the autopilot's driver settings apply exactly as on real silicon.

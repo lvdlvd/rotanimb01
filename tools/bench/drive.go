@@ -84,8 +84,8 @@ func gpsCfgPayload(enable bool, lagMs int) ([]byte, error) {
 }
 
 // noiseScale converts a multiplier on the harness's compiled-in datasheet
-// sigma to the u8 wire unit of 1/16, the encoding CMD_NOISE uses for all five
-// scale bytes. 16 = 1.0x = what the harness boots with.
+// nominal level to the u8 wire unit of 1/16, the encoding CMD_NOISE uses for
+// all seven scale bytes. 16 = 1.0x = what the harness boots with.
 func noiseScale(what string, x float64) (byte, error) {
 	if x < 0 || x > 255.0/16.0 {
 		return 0, fmt.Errorf("noise %s scale %g out of range 0..15.9375", what, x)
@@ -93,35 +93,52 @@ func noiseScale(what string, x float64) (byte, error) {
 	return byte(math.Round(x * 16.0)), nil
 }
 
+// noiseCfg is one CMD_NOISE frame's worth of settings: a multiplier on each
+// of the harness's compiled-in nominal levels. 1.0 = nominal = what the
+// harness boots with, 0 = off.
+type noiseCfg struct {
+	gyro, accel, mag, baro float64 // white noise on the four emulated sensors
+	bias                   float64 // gyro/accel turn-on bias and in-run walk
+	pitot, gps             float64 // differential pressure; GPS position/velocity
+	redraw, zero           bool    // re-draw the turn-on biases, or zero them
+}
+
+func defaultNoise() noiseCfg {
+	return noiseCfg{gyro: 1, accel: 1, mag: 1, baro: 1, bias: 1, pitot: 1, gps: 1}
+}
+
 // noisePayload encodes CMD_NOISE (canmsg.h 0x42): u8 gyro, accel, mag, baro
-// white-noise scale, u8 bias scale (turn-on bias and in-run walk), u8 flags
-// (bit0 re-draw the turn-on biases, bit1 zero them), zero-padded to 8 bytes.
-// It is a full-state frame like WIND: every field is applied on every frame.
+// white-noise scale, u8 bias scale, u8 flags (bit0 re-draw the turn-on
+// biases, bit1 zero them), u8 pitot scale, u8 GPS scale — all the scales in
+// 1/16 of nominal. It is a full-state frame like WIND: every field is applied
+// on every frame.
 //
 // The baro scale is clamped to >= 1.0 and can only be turned up. A
 // bit-identical pressure stream reads as a DEAD sensor to both flight stacks
 // (ArduPilot's stuck-baro detector, PX4's DataValidator), so the harness
 // floors it too — this clamp only makes the host agree with what it gets.
-func noisePayload(gyro, accel, mag, baro, bias float64, redraw, zero bool) ([]byte, error) {
-	if baro < 1.0 {
-		fmt.Fprintf(os.Stderr, "noise: baro scale %g clamped to 1.0 (a noise-free baro reads as broken)\n", baro)
-		baro = 1.0
+func noisePayload(c noiseCfg) ([]byte, error) {
+	if c.baro < 1.0 {
+		fmt.Fprintf(os.Stderr, "noise: baro scale %g clamped to 1.0 (a noise-free baro reads as broken)\n", c.baro)
+		c.baro = 1.0
 	}
 	p := make([]byte, 8)
-	for i, s := range []struct {
+	for _, f := range []struct {
 		what string
+		at   int
 		x    float64
-	}{{"gyro", gyro}, {"accel", accel}, {"mag", mag}, {"baro", baro}, {"bias", bias}} {
-		b, err := noiseScale(s.what, s.x)
+	}{{"gyro", 0, c.gyro}, {"accel", 1, c.accel}, {"mag", 2, c.mag}, {"baro", 3, c.baro},
+		{"bias", 4, c.bias}, {"pitot", 6, c.pitot}, {"gps", 7, c.gps}} {
+		b, err := noiseScale(f.what, f.x)
 		if err != nil {
 			return nil, err
 		}
-		p[i] = b
+		p[f.at] = b
 	}
-	if redraw {
+	if c.redraw {
 		p[5] |= 1
 	}
-	if zero {
+	if c.zero {
 		p[5] |= 2
 	}
 	return p, nil
@@ -293,57 +310,62 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 	case "noise":
 		// scale the harness's sensor noise (canmsg.h 0x42). RAM only, like
 		// the cal and the engine preset: a harness reboot comes back at 1.0x.
-		usage := fmt.Errorf("drive noise default|off|<gyro> <accel> <mag> <baro> [bias] [redraw|zero]")
+		usage := fmt.Errorf("drive noise default|off|<gyro> <accel> <mag> <baro> " +
+			"[bias] [pitot] [gps] [redraw|zero]")
 		if len(args) < 1 {
 			return usage
 		}
-		g, a, m, b, bias := 1.0, 1.0, 1.0, 1.0, 1.0
+		cfg := defaultNoise()
 		var rest []string
 		switch args[0] {
 		case "default":
 			rest = args[1:]
 		case "off":
-			g, a, m, b, bias = 0, 0, 0, 0, 0 // baro floors at 1.0x, see noisePayload
+			// baro floors at 1.0x on both sides, see noisePayload
+			cfg = noiseCfg{}
 			rest = args[1:]
 		default:
 			if len(args) < 4 {
 				return usage
 			}
-			for i, v := range []*float64{&g, &a, &m, &b} {
+			// four required, then bias/pitot/gps in order for as far as the
+			// caller cares to go; anything non-numeric ends the list
+			for i, v := range []*float64{&cfg.gyro, &cfg.accel, &cfg.mag, &cfg.baro,
+				&cfg.bias, &cfg.pitot, &cfg.gps} {
+				if i >= len(args) {
+					break
+				}
 				x, err := strconv.ParseFloat(args[i], 64)
 				if err != nil {
-					return fmt.Errorf("drive noise: %q is not a scale: %w", args[i], err)
+					if i < 4 {
+						return fmt.Errorf("drive noise: %q is not a scale: %w", args[i], err)
+					}
+					break
 				}
 				*v = x
-			}
-			rest = args[4:]
-			if len(rest) > 0 && rest[0] != "redraw" && rest[0] != "zero" {
-				x, err := strconv.ParseFloat(rest[0], 64)
-				if err != nil {
-					return fmt.Errorf("drive noise: %q is not a bias scale: %w", rest[0], err)
-				}
-				bias, rest = x, rest[1:]
+				rest = args[i+1:]
 			}
 		}
-		var redraw, zero bool
 		for _, r := range rest {
 			switch r {
 			case "redraw":
-				redraw = true
+				cfg.redraw = true
 			case "zero":
-				zero = true
+				cfg.zero = true
 			default:
 				return usage
 			}
 		}
-		p, err := noisePayload(g, a, m, b, bias, redraw, zero)
+		p, err := noisePayload(cfg)
 		if err != nil {
 			return err
 		}
 		if err := harnessCmd(dev, canNoise, 12, p); err != nil {
 			return err
 		}
-		fmt.Printf("noise scales %v sent (RAM only: resend after a harness reboot)\n", p[:6])
+		fmt.Printf("noise scales g/a/m/b/bias/pitot/gps %d/%d/%d/%d/%d/%d/%d sent "+
+			"(RAM only: resend after a harness reboot)\n",
+			p[0], p[1], p[2], p[3], p[4], p[6], p[7])
 		return tailPrint(con, 2.5, 3)
 
 	case "engine":

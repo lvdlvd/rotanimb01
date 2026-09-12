@@ -221,11 +221,12 @@ and the parm file comments. The ones that cost the most:
   counters (healthy = 0, always). Cure: reset the harness, confirm the
   counters return to 0, then boot the DUT. What shifts the command byte
   has not been found; see [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md).
-- **GPS and airspeed carry no noise**, only lag. The DroneCAN feeder sends
-  truth position with fixed covariances and a differential pressure computed
-  straight from truth IAS; `bench drive gps` models the transport lag and
-  nothing else. `bench drive noise` covers the four emulated SPI sensors
-  only. Modelling GNSS and pitot error is a separate project.
+- **GPS error is correlated, not white**, so it does not average away: the
+  feeder adds a first-order Gauss-Markov position error (1 m horizontal, 2 m
+  vertical, 60 s time constant) on top of the transport lag, and advertises a
+  covariance that matches. Velocity noise is white and small, as on a real
+  doppler-derived fix. `bench drive noise` scales it, and the pitot's, along
+  with the four emulated SPI sensors.
 - The spiral mode over-converges and the short period is overdamped
   with the default coefficients ([doc/FDM-TUNING.md](doc/FDM-TUNING.md) has the knobs).
 - tools/bench also speaks an experimental ArduPlane mode (HDGALT,

@@ -27,10 +27,12 @@
 //                                     in-run walk), all in 1/16 of the datasheet
 //                                     default in main.c (16 = 1.0x = boot, 0 = off);
 //                                     u8 flags (bit0 re-draw the turn-on biases,
-//                                     bit1 zero them). Full-state, RAM only. The baro
-//                                     scale is FLOORED at 16: a bit-identical pressure
-//                                     stream reads as a dead sensor to both flight
-//                                     stacks, so that knob turns up, never off.
+//                                     bit1 zero them); u8 pitot scale (differential
+//                                     pressure), u8 GPS scale (position + velocity).
+//                                     Full-state, RAM only. The baro scale is FLOORED
+//                                     at 16: a bit-identical pressure stream reads as
+//                                     a dead sensor to both flight stacks, so that
+//                                     knob turns up, never off.
 //                     0x43 FDM_MODE   u8 mode (0 kinematic / 1 six-dof), u8 flags
 //                     0x44 FDM_INIT   u16 alt m, u16 IAS 0.1 m/s, u16 heading 0.01 deg
 //                                     -> fdm trim & reset (air-start), fdm-DESIGN.md

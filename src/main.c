@@ -252,6 +252,82 @@ static const struct GpsSnap *gps_snap(uint32_t now) {
 	return NULL;
 }
 
+// sensor noise (M7'-lite): datasheet-scale white noise in PHYSICAL units,
+// added before quantization so it tracks whatever range the DUT configures.
+// Sum of two xorshift uniforms — triangular, close enough to Gaussian for
+// an EKF's purposes. Sigmas: BMI088 gyro ~0.2 deg/s and accel ~5 mg at
+// AP's filter settings, RM3100 ~20 nT.
+static float noise(float sigma) {
+	static uint32_t rng = 0x1337c0deu;
+	rng ^= rng << 13;
+	rng ^= rng >> 17;
+	rng ^= rng << 5;
+	float u1 = (float)(int32_t)(rng & 0xffff) - 32768.0f;
+	rng ^= rng << 13;
+	rng ^= rng >> 17;
+	rng ^= rng << 5;
+	float u2 = (float)(int32_t)(rng & 0xffff) - 32768.0f;
+	return (u1 + u2) * (sigma * (1.0f / 26756.0f)); // var(u1+u2) -> sigma^2
+}
+
+// CMD_NOISE (canmsg.h 0x42) scales, in 1/16 of the nominal level beside each
+// model: 16 = 1.0x = what the bench boots with, 0 = off. RAM only, like every
+// other harness setting — resend after a reboot. nz_baro floors at 16
+// (sample_baro): that one turns up, never off.
+static uint8_t nz_gyro = 16, nz_accel = 16, nz_mag = 16, nz_baro = 16, nz_bias = 16,
+               nz_pitot = 16, nz_gps = 16;
+static inline float nzf(uint8_t s) { return (float)s * (1.0f / 16.0f); }
+
+// Aiding-sensor error. Until now the DroneCAN feeder carried NO error at
+// all: Fix2 reported truth position with a fixed advertised covariance, and
+// the pitot reported 0.5*rho*ias^2 exactly — a parked aircraft sent a
+// bit-identical 0.0 Pa forever, which is precisely the stuck-source pattern
+// PX4's DataValidator rejects after 100 samples and which leaves ArduPilot's
+// airspeed offset calibration nothing to chew on. Lag was the only modelled
+// degradation (gps_lag_10ms).
+//
+// GPS position error is FIRST-ORDER GAUSS-MARKOV, not white. Real GNSS error
+// is slowly correlated — ionosphere, multipath, orbit and clock all drift
+// over minutes — and an EKF filters white jitter away almost for free, so a
+// white model would flatter the bench and hide exactly the slow-bias
+// behaviour the filter is supposed to fight. Vertical is the worse axis, as
+// on real receivers. Velocity is doppler-derived and much cleaner, so it
+// stays white.
+#define GPS_SIGMA_H_M 1.0f    // horizontal position, stationary sigma
+#define GPS_SIGMA_V_M 2.0f    // vertical position
+#define GPS_SIGMA_VEL 0.05f   // velocity, white, per axis (m/s)
+#define GPS_TAU_S 60.0f       // correlation time of the position error
+#define PITOT_SIGMA_PA 0.5f   // differential pressure RMS
+
+static float gps_err_m[3]; // NED position error, the Gauss-Markov state
+static uint32_t gps_err_us;
+
+// Advance the correlated position error to `now`. Euler-Maruyama on
+// de = -e*dt/tau + sigma*sqrt(2*dt/tau)*w, whose stationary sigma is the
+// sigma passed in.
+static void gps_err_step(uint32_t now) {
+	uint32_t last = gps_err_us;
+	gps_err_us = now;
+	if (last == 0) {
+		return; // first call: no interval to integrate over
+	}
+	float dt = (float)(now - last) * 1e-6f;
+	// BOUND THE STEP. The feeder can be switched off for minutes (GPS_CFG),
+	// and integrating the whole gap in one Euler step on return would kick
+	// the error somewhere absurd — the bench has been bitten by exactly that
+	// shape of bug before. A capped step just means the error resumes from
+	// where it was, which is what a receiver that was off would do anyway.
+	if (dt > 1.0f) {
+		dt = 1.0f;
+	}
+	float a = dt / GPS_TAU_S;
+	float sd = sqrtf(2.0f * a) * nzf(nz_gps);
+	for (int i = 0; i < 3; i++) {
+		float sigma = i == 2 ? GPS_SIGMA_V_M : GPS_SIGMA_H_M;
+		gps_err_m[i] += -a * gps_err_m[i] + noise(sigma * sd);
+	}
+}
+
 // RawAirData, sent UNCONDITIONALLY from the first instant of boot — a
 // parked harness reports zero airspeed rather than staying silent. The
 // consumer's binding is one-shot: ArduPilot's AP_Airspeed::init() runs
@@ -271,7 +347,9 @@ static void gps_feed_air(uint32_t now) {
 	struct DroneCanFrame fr[16];
 	int n = dronecan_broadcast(DRONECAN_RAWAIR_ID, DRONECAN_RAWAIR_SIGNATURE, DRONECAN_PRIO_MEDIUM,
 	                           42, &gps_tid_air, buf,
-	                           dronecan_rawair(0.5f * 1.225f * ias * ias, 0.0f, 288.15f, buf), fr, 16);
+	                           dronecan_rawair(0.5f * 1.225f * ias * ias +
+                                               noise(PITOT_SIGMA_PA * nzf(nz_pitot)),
+                                           0.0f, 288.15f, buf), fr, 16);
 	gps_enqueue(fr, n);
 }
 
@@ -282,15 +360,29 @@ static void gps_feed(uint32_t now) {
 	if (snap == NULL) {
 		return;
 	}
+	gps_err_step(now);
+	float sh = GPS_SIGMA_H_M * nzf(nz_gps), sv = GPS_SIGMA_V_M * nzf(nz_gps);
+	float svel = GPS_SIGMA_VEL * nzf(nz_gps);
+	int32_t n_cm = snap->n_cm + (int32_t)(gps_err_m[0] * 100.0f);
+	int32_t e_cm = snap->e_cm + (int32_t)(gps_err_m[1] * 100.0f);
+	int32_t h_cm = snap->h_cm - (int32_t)(gps_err_m[2] * 100.0f); // D error, h is up
+	// Advertise what we are actually doing, floored at the accuracy this feed
+	// claimed before it had any error at all: a receiver's reported accuracy
+	// is conservative, and an EKF fed a covariance smaller than the true error
+	// is being lied to in the direction that makes it overconfident.
+	float cov_h = sh * sh > 1.0f ? sh * sh : 1.0f;
+	float cov_v = sv * sv > 1.0f ? sv * sv : 1.0f;
+	float cov_vel = svel * svel > 0.25f ? svel * svel : 0.25f;
 	struct DroneCanFix2 fx = {
 		.usec = now,
-		.lat_deg_1e8 = gps_lat0_1e8 + (int64_t)snap->n_cm * gps_ncm_num / gps_cm_den,
-		.lon_deg_1e8 = gps_lon0_1e8 + (int64_t)snap->e_cm * gps_ecm_num / gps_cm_den,
-		.h_mm = snap->h_cm * 10,
-		.vned = {snap->v_cms[0] * 0.01f, snap->v_cms[1] * 0.01f, snap->v_cms[2] * 0.01f},
+		.lat_deg_1e8 = gps_lat0_1e8 + (int64_t)n_cm * gps_ncm_num / gps_cm_den,
+		.lon_deg_1e8 = gps_lon0_1e8 + (int64_t)e_cm * gps_ecm_num / gps_cm_den,
+		.h_mm = h_cm * 10,
+		.vned = {snap->v_cms[0] * 0.01f + noise(svel), snap->v_cms[1] * 0.01f + noise(svel),
+		         snap->v_cms[2] * 0.01f + noise(svel)},
 		.sats = 12,
 		.status = 3,
-		.cov = {1, 1, 1, 0.25f, 0.25f, 0.25f},
+		.cov = {cov_h, cov_h, cov_v, cov_vel, cov_vel, cov_vel},
 		.pdop = 1.5f,
 	};
 	uint8_t buf[64];
@@ -355,24 +447,6 @@ static int16_t sat16(float x) {
 	return (int16_t)x;
 }
 
-// sensor noise (M7'-lite): datasheet-scale white noise in PHYSICAL units,
-// added before quantization so it tracks whatever range the DUT configures.
-// Sum of two xorshift uniforms — triangular, close enough to Gaussian for
-// an EKF's purposes. Sigmas: BMI088 gyro ~0.2 deg/s and accel ~5 mg at
-// AP's filter settings, RM3100 ~20 nT.
-static float noise(float sigma) {
-	static uint32_t rng = 0x1337c0deu;
-	rng ^= rng << 13;
-	rng ^= rng >> 17;
-	rng ^= rng << 5;
-	float u1 = (float)(int32_t)(rng & 0xffff) - 32768.0f;
-	rng ^= rng << 13;
-	rng ^= rng >> 17;
-	rng ^= rng << 5;
-	float u2 = (float)(int32_t)(rng & 0xffff) - 32768.0f;
-	return (u1 + u2) * (sigma * (1.0f / 26756.0f)); // var(u1+u2) -> sigma^2
-}
-
 // The gyro's nastiest error is not the white noise: it is a per-boot
 // turn-on bias plus an in-run bias that random-walks in 3D — the whole
 // reason attitude filters carry gyro-bias states and lean on accel+mag
@@ -381,12 +455,6 @@ static float noise(float sigma) {
 // gets a small fixed turn-on bias so those filter states work too.
 static float gyro_bias[3], accel_bias[3];
 static uint8_t imu_bias_init;
-
-// CMD_NOISE (canmsg.h 0x42) scales, in 1/16 of the datasheet default above:
-// 16 = 1.0x = what the bench boots with, 0 = off. RAM only, like every other
-// harness setting — resend after a reboot. nz_baro floors at 16 (sample_baro).
-static uint8_t nz_gyro = 16, nz_accel = 16, nz_mag = 16, nz_baro = 16, nz_bias = 16;
-static inline float nzf(uint8_t s) { return (float)s * (1.0f / 16.0f); }
 
 // pull the physics truth, quantize per the live configs, commit
 static void sample_gyro(uint32_t now) {
@@ -516,6 +584,8 @@ static void cmd_decode(void) {
 		nz_mag = p[2];
 		nz_baro = p[3] < 16 ? 16 : p[3]; // the dither is mandatory: sample_baro
 		nz_bias = p[4];
+		nz_pitot = p[6];
+		nz_gps = p[7];
 		if (p[5] & 2) { // zero the turn-on biases and the accumulated walk
 			for (int i = 0; i < 3; i++) {
 				gyro_bias[i] = accel_bias[i] = 0.0f;
@@ -905,7 +975,7 @@ void Reset_Handler(void) {
 			const struct PhysicsTruth *pt = truth();
 			uint32_t pc = phys_cycles_max;
 			phys_cycles_max = 0;
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u nz %u/%u/%u/%u/%u ",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u nz %u/%u/%u/%u/%u/%u/%u ",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
 			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
 			        (unsigned)pt->p_pa, (unsigned)fdm_mode,
@@ -914,7 +984,7 @@ void Reset_Handler(void) {
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
 			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)cmd_state.seq,
-			        nz_gyro, nz_accel, nz_mag, nz_baro, nz_bias);
+			        nz_gyro, nz_accel, nz_mag, nz_baro, nz_bias, nz_pitot, nz_gps);
 			tprintf("gps tx %u bo %u lec %u/%u/%u/%u/%u/%u/%u ",
 			        (unsigned)can_gps.status.tx_count, (unsigned)gps_busoff,
 			        (unsigned)can_gps.status.lec_count[1], (unsigned)can_gps.status.lec_count[2],

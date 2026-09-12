@@ -56,4 +56,9 @@ float mag_lsb_per_ut(void);      // 0.3671 * CC + 1.5, from the live CC regs
 bool gyro_commit(const int16_t xyz[3], uint32_t now_us);
 bool accel_commit(const int16_t xyz[3], float t_degc, uint32_t now_us);
 bool baro_commit(float t_degc, double p_pa, uint32_t now_us); // raw words via bmp390inv
+
+// SPI-slave desync: refused writes + stray/midframe, healthy is a hard zero
+uint32_t sensors_unexpected(void);
+// re-arm the slave engine in place, keeping the emulated register files
+void sensors_bus_resync(void);
 bool mag_commit(const int32_t xyz[3], uint32_t now_us);       // 24-bit signed per axis

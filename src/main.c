@@ -713,6 +713,8 @@ void Reset_Handler(void) {
 		uint32_t change_us; // last time count advanced
 	} chan[8] = {0};
 
+	uint32_t unexp_last = 0, t_resync = 0, resyncs = 0;
+	bool desync = false;
 	uint32_t t_pwm = now_us(), t_status = t_pwm, t_diag = t_pwm, t_tick = t_pwm, t_truth = t_pwm,
 			 t_gpsfeed = t_pwm, t_airfeed = t_pwm, t_nodest = t_pwm;
 	for (;;) {
@@ -935,6 +937,31 @@ void Reset_Handler(void) {
 
 		if ((int32_t)(now - t_status) >= 100000) { // STATUS 10 Hz
 			t_status = now;
+
+			// SPI-slave desync watchdog. The counter semantics make this a
+			// detector rather than a heuristic: `unexpected` counts writes
+			// refused by the write mask, which is exactly what a shifted
+			// command byte produces, and a healthy bus sits at a hard zero
+			// indefinitely. Measured: healthy 0, desynced ~1800 per 100 ms.
+			// This does NOT fix the desync — the origin is still unlocated —
+			// it detects it and re-arms the engine in place, which costs a few
+			// frames instead of the harness reboot that loses every RAM-only
+			// setting (PWM cal, engine model, noise scales).
+			uint32_t unexp_now = sensors_unexpected();
+			uint32_t unexp_rate = unexp_now - unexp_last;
+			unexp_last = unexp_now;
+			if (unexp_rate > 8) { // far above healthy-zero, far below a fault
+				desync = true;
+				if (now - t_resync > 1000000) { // at most once a second
+					t_resync = now;
+					resyncs++;
+					sensors_bus_resync();
+					unexp_last = sensors_unexpected();
+				}
+			} else if (unexp_rate == 0) {
+				desync = false; // quiet again
+			}
+
 			bool stale = cmd_state.seq == 0 || now - cmd_state.rx_us > 1000000;
 			float psi_deg = truth()->psi * (180.0f / (float)M_PI);
 			if (psi_deg < 0) {
@@ -945,7 +972,8 @@ void Reset_Handler(void) {
 			encode_be_uint16(p + 4, (uint16_t)(psi_deg * 100.0f)); // psi 0.01 deg
 			encode_be_uint16(p + 6, (uint16_t)((stale ? 1 : 0) | physics_flags() |
 			                                   (fdm_mode ? controls_flags() : 0) |
-			                                   (fdm_crashes ? 1 << 5 : 0)));
+			                                   (fdm_crashes ? 1 << 5 : 0) |
+			                                   (desync ? 1 << 6 : 0)));
 			can_send(CANMSG_STATUS, p, 8);
 		}
 
@@ -975,7 +1003,7 @@ void Reset_Handler(void) {
 			const struct PhysicsTruth *pt = truth();
 			uint32_t pc = phys_cycles_max;
 			phys_cycles_max = 0;
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u nz %u/%u/%u/%u/%u/%u/%u ",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u resync %u cmd seq %u nz %u/%u/%u/%u/%u/%u/%u ",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
 			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
 			        (unsigned)pt->p_pa, (unsigned)fdm_mode,
@@ -983,7 +1011,8 @@ void Reset_Handler(void) {
 			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
-			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)cmd_state.seq,
+			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)resyncs,
+			        (unsigned)cmd_state.seq,
 			        nz_gyro, nz_accel, nz_mag, nz_baro, nz_bias, nz_pitot, nz_gps);
 			tprintf("gps tx %u bo %u lec %u/%u/%u/%u/%u/%u/%u ",
 			        (unsigned)can_gps.status.tx_count, (unsigned)gps_busoff,

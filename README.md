@@ -214,13 +214,29 @@ and the parm file comments. The ones that cost the most:
 
 ## Known issues
 
-- **SPI slave desynchronisation (origin unlocated).** Rarely, the
-  slave engine loses byte alignment with the DUT's bus master; the
-  harness's `unexp` counter then climbs by thousands per second and
-  ArduPlane boot-loops on the corrupt inertial-sensor replies. Detector: the
-  counters (healthy = 0, always). Cure: reset the harness, confirm the
-  counters return to 0, then boot the DUT. What shifts the command byte
-  has not been found; see [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md).
+- **SPI slave desynchronisation (origin still unlocated).** The slave engine
+  loses byte alignment with the DUT's bus master; the harness's `unexp`
+  counter then climbs by thousands per second and ArduPlane boot-loops on the
+  corrupt inertial-sensor replies. **A DUT reset is one reliable trigger** —
+  reproduced three ways (SWD warm reset, SWD reset after a clean harness
+  reboot, and a plain MAVLink software reboot with no debugger attached), so
+  it is not a debugger artefact: any reset floats the DUT's SPI lines through
+  its startup and clocks garbage into the slave. It is **not established as
+  the only trigger**; the rarer unexplained cases predate that finding.
+  Detector: the counters, healthy = 0 always. Recovery order matters — reset
+  the **DUT first, then the harness ~2 s later**, then `drive mode 1`; the
+  reverse order leaves the harness desynchronised, because the DUT's reset is
+  what corrupts it.
+  Since 1.2 the harness **detects this itself and re-arms the engine in
+  place**: the 10 Hz watchdog watches the refused-write rate (healthy is a
+  hard zero; a desync runs ~1800 per 100 ms), raises **bit 6 of the STATUS
+  flags**, and calls a resync at most once a second, counting them as
+  `resync N` on the console heartbeat. The resync keeps the emulated register
+  files, so the DUT's configuration survives and the harness's RAM-only state
+  (PWM calibration, engine model, noise scales) is not lost the way a reboot
+  loses it. **This does not fix the desync** — the origin is still unlocated —
+  it shortens the recovery from a reboot-and-restage to a few frames. See
+  [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md).
 - **GPS error is correlated, not white**, so it does not average away: the
   feeder adds a first-order Gauss-Markov position error (1 m horizontal, 2 m
   vertical, 60 s time constant) on top of the transport lag, and advertises a

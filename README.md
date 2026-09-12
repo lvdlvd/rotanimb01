@@ -211,6 +211,21 @@ and the parm file comments. The ones that cost the most:
 - Bootloader builds in ArduPilot share the board's build directory with
   the application build; build the bootloader from a clean
   `build/NucleoF767ZI` or the generated DroneCAN headers go missing.
+- **Fixed wing only, and a multirotor is not just another FDM.** The bus
+  side is airframe-blind — the emulated sensor register files, the
+  DroneCAN GPS feed, truth telemetry, PWM capture, the 1 kHz step — but
+  the FDM/harness contract is not: `struct FdmControls` is da/de/dr/dt in
+  radians, `src/controls.c` hard-codes AETR channel order, calibration in
+  degrees of surface deflection and a 60 ms / 300 deg/s servo lag (a
+  quad's four channels are all throttle-like, with rotor spin-up lag
+  instead), `fdm_trim` solves level flight rather than hover and its
+  output is what the failsafe falls back to (which glides on a plane and
+  drops on a quad), and the ground model is tricycle gear. Expect a new
+  FDM plus a rewritten input path, trim/air-start path, parameter table
+  and golden gates, and ArduCopter or a PX4 quad airframe on the DUT. The
+  open question is latency: this bench was sized against an
+  open-loop-stable airframe, so measure the sample→SPI→PWM round trip
+  against a multirotor attitude loop before trusting the port.
 
 ## Licence
 

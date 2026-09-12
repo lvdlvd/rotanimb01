@@ -241,6 +241,17 @@ and the parm file comments. The ones that cost the most:
   quantisation, so consecutive samples are never identical — but the 0.1 m/s
   step itself remains, and anything that differentiates airspeed (TECS's rate
   response, EKF airspeed fusion innovations) still sees it.
+  **If you are flying a pre-1.1 harness image against PX4, read this twice:**
+  PX4's `airspeed_selector` runs a data-stuck check that trips on ~3 s of
+  exactly-constant indicated airspeed in fixed-wing flight (2 s
+  `DATA_STUCK_TIMEOUT` plus the 1 s `ASPD_FS_T_STOP` failsafe delay), it is
+  enabled by default (`ASPD_DO_CHECKS` defaults to 7), and `ASPD_FS_T_START`
+  defaults to -1, which disables re-enabling in flight. So one qualifying
+  interval invalidates the airspeed **for the rest of that flight**, with
+  `ASPD_FALLBACK` defaulting to no fallback. We measured bin residencies up to
+  2.9 s in a climb without seeing it trip, so we have not observed this
+  happening — but the margin was 3% and we could not rule it out. Images from
+  1.1 on do not have the mechanism.
 - The spiral mode over-converges and the short period is overdamped
   with the default coefficients ([doc/FDM-TUNING.md](doc/FDM-TUNING.md) has the knobs).
 - tools/bench also speaks an experimental ArduPlane mode (HDGALT,

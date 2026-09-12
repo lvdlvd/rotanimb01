@@ -382,22 +382,29 @@ static float noise(float sigma) {
 static float gyro_bias[3], accel_bias[3];
 static uint8_t imu_bias_init;
 
+// CMD_NOISE (canmsg.h 0x42) scales, in 1/16 of the datasheet default above:
+// 16 = 1.0x = what the bench boots with, 0 = off. RAM only, like every other
+// harness setting — resend after a reboot. nz_baro floors at 16 (sample_baro).
+static uint8_t nz_gyro = 16, nz_accel = 16, nz_mag = 16, nz_baro = 16, nz_bias = 16;
+static inline float nzf(uint8_t s) { return (float)s * (1.0f / 16.0f); }
+
 // pull the physics truth, quantize per the live configs, commit
 static void sample_gyro(uint32_t now) {
 	const struct PhysicsTruth *t = truth();
 	if (!imu_bias_init) {
 		imu_bias_init = 1;
 		for (int i = 0; i < 3; i++) {
-			gyro_bias[i] = noise(0.15f);  // deg/s, fixed for this boot
-			accel_bias[i] = noise(0.05f); // m/s^2
+			gyro_bias[i] = noise(0.15f * nzf(nz_bias));  // deg/s, fixed for this boot
+			accel_bias[i] = noise(0.05f * nzf(nz_bias)); // m/s^2
 		}
 	}
 	float srw = 0.002f * sqrtf(1.0f / (float)gyro_rate_hz()); // walk step at this ODR
 	float lsb = 32767.0f / gyro_fullscale_dps(); // counts per deg/s
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
-		gyro_bias[i] += noise(srw);
-		xyz[i] = sat16((t->rate[i] * (180.0f / (float)M_PI) + gyro_bias[i] + noise(0.2f)) * lsb);
+		gyro_bias[i] += noise(srw * nzf(nz_bias));
+		xyz[i] = sat16((t->rate[i] * (180.0f / (float)M_PI) + gyro_bias[i] +
+		                noise(0.2f * nzf(nz_gyro))) * lsb);
 	}
 	gyro_commit(xyz, now);
 }
@@ -407,7 +414,7 @@ static void sample_accel(uint32_t now) {
 	float lsb = 32767.0f / (accel_fullscale_g() * PHYSICS_G); // counts per m/s^2
 	int16_t xyz[3];
 	for (int i = 0; i < 3; i++) {
-		xyz[i] = sat16((t->sforce[i] + accel_bias[i] + noise(0.05f)) * lsb);
+		xyz[i] = sat16((t->sforce[i] + accel_bias[i] + noise(0.05f * nzf(nz_accel))) * lsb);
 	}
 	accel_commit(xyz, t->t_degc, now);
 }
@@ -417,9 +424,20 @@ static void sample_mag(uint32_t now) {
 	float lsb = mag_lsb_per_ut();
 	int32_t xyz[3];
 	for (int i = 0; i < 3; i++) {
-		xyz[i] = (int32_t)((t->mag[i] + noise(0.02f)) * lsb);
+		xyz[i] = (int32_t)((t->mag[i] + noise(0.02f * nzf(nz_mag))) * lsb);
 	}
 	mag_commit(xyz, now);
+}
+
+static void sample_baro(uint32_t now) {
+	const struct PhysicsTruth *t = truth();
+	// The dither is MANDATORY, not optional: ArduPilot's stuck-baro detector
+	// and PX4's sensors-module DataValidator both declare a bit-identical
+	// pressure stream unhealthy — a perfectly noise-free baro reads as
+	// broken. Hence the floor on nz_baro in cmd_decode: this knob turns up,
+	// never off. Sigma 0.58 Pa is RMS-matched to the +-1 Pa uniform dither
+	// this replaced (BMP388-class noise).
+	baro_commit(t->t_degc, t->p_pa + noise(0.58f * nzf(nz_baro)), now);
 }
 
 // ---- host command decode (big-endian, canmsg.h dictionary) -------------------
@@ -488,6 +506,24 @@ static void cmd_decode(void) {
 	if (cmd_snapshot(&cmd_gps_cfg, p, &seq_gps)) {
 		gps_enable = p[0];
 		gps_lag_10ms = p[1];
+	}
+	static uint32_t seq_noise;
+	if (cmd_snapshot(&cmd_noise, p, &seq_noise)) {
+		// full-state frame: u8 gyro/accel/mag/baro white-noise scale, u8 bias
+		// scale, u8 flags, all in 1/16 of the datasheet default
+		nz_gyro = p[0];
+		nz_accel = p[1];
+		nz_mag = p[2];
+		nz_baro = p[3] < 16 ? 16 : p[3]; // the dither is mandatory: sample_baro
+		nz_bias = p[4];
+		if (p[5] & 2) { // zero the turn-on biases and the accumulated walk
+			for (int i = 0; i < 3; i++) {
+				gyro_bias[i] = accel_bias[i] = 0.0f;
+			}
+			imu_bias_init = 1;
+		} else if (p[5] & 1) { // re-draw them: sample_gyro's lazy init does it
+			imu_bias_init = 0;
+		}
 	}
 	static uint32_t seq_wind, seq_param;
 	if (cmd_snapshot(&cmd_wind, p, &seq_wind)) {
@@ -713,8 +749,7 @@ void Reset_Handler(void) {
 				}
 				if ((hz = baro_rate_hz()) != 0 && (acc_b += hz) >= 10000) {
 					acc_b -= 10000;
-					const struct PhysicsTruth *t = truth();
-					baro_commit(t->t_degc, t->p_pa, now);
+					sample_baro(now);
 				}
 				if ((hz = mag_rate_hz()) != 0 && (acc_m += hz) >= 10000) {
 					acc_m -= 10000;
@@ -870,7 +905,7 @@ void Reset_Handler(void) {
 			const struct PhysicsTruth *pt = truth();
 			uint32_t pc = phys_cycles_max;
 			phys_cycles_max = 0;
-			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u ",
+			tprintf("t %u us pwm %u %u %u %u %u %u %u %u psi %d cdeg h %d cm p %u Pa fdm %u%s phys %u cy spi g/a/b/m %u/%u/%u/%u unexp %u stray %u mid %u cmd seq %u nz %u/%u/%u/%u/%u ",
 			        (unsigned)now, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
 			        (int)(pt->psi * (18000.0f / (float)M_PI)), (int)(pt->h * 100.0f),
 			        (unsigned)pt->p_pa, (unsigned)fdm_mode,
@@ -878,7 +913,8 @@ void Reset_Handler(void) {
 			        (unsigned)gyro_dev.frames, (unsigned)accel_dev.frames,
 			        (unsigned)baro_dev.frames, (unsigned)mag_dev.frames,
 			        (unsigned)(gyro_dev.unexpected + accel_dev.unexpected + baro_dev.unexpected + mag_dev.unexpected),
-			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)cmd_state.seq);
+			        (unsigned)sensor_bus.stray, (unsigned)sensor_bus.midframe, (unsigned)cmd_state.seq,
+			        nz_gyro, nz_accel, nz_mag, nz_baro, nz_bias);
 			tprintf("gps tx %u bo %u lec %u/%u/%u/%u/%u/%u/%u ",
 			        (unsigned)can_gps.status.tx_count, (unsigned)gps_busoff,
 			        (unsigned)can_gps.status.lec_count[1], (unsigned)can_gps.status.lec_count[2],

@@ -365,8 +365,10 @@ from `lib/cordic.h`:
   temperature; T(h) feeds every device's temperature registers.
 
 Quantization uses the live device configs (range/ODR/CC registers).
-Optional per-sensor noise (xorshift white + settable bias) is a
-CAN-switchable layer, off by default. V = 0 (bench cal) forces γ = φ =
+Per-sensor noise (xorshift white + a per-boot bias and random walk) is
+ON by default at datasheet levels — as built, not off by default as
+planned: a quiet bench reads as a broken sensor to both flight stacks.
+CMD_NOISE scales it per sensor at runtime, with the baro floored. V = 0 (bench cal) forces γ = φ =
 0: 1 g down, earth field, zero rates. asin/atan domains guarded by
 clamping + a CAN status flag, never NaN.
 
@@ -385,7 +387,7 @@ stay with the existing device dictionary. Scaled ints, 8-byte frames:
 | -------------- | -------- | --------------------------------------------------------------------------- |
 | TMC 0x40       | →harness | CMD_STATE: V cm/s i16, ḣ cm/s i16, ψ̇ mrad/s i16, flags u16                  |
 | TMC 0x41       | →harness | CMD_ENV: QNH Pa/10 u16, T₀ 0.1 K u16, mag B 0.01 µT u16, incl 0.01° i16     |
-| TMC 0x42       | →harness | CMD_NOISE: per-sensor enable mask + levels                                  |
+| TMC 0x42       | →harness | CMD_NOISE: 5 × u8 noise scale (gyro/accel/mag/baro/bias), 1/16 of default, u8 flags |
 | MEAS 0x40/0x41 | harness→ | PWM ch1–4 / ch5–8: 4 × u16 µs, 50 Hz + on change (> 2 µs)                   |
 | MEAS 0x42      | harness→ | STATUS 10 Hz: harness time µs u32 (truncated), ψ 0.01° u16, flags u16       |
 | MEAS 0x43      | harness→ | DIAG: per-device transaction / unexpected-access / prediction-miss counters |

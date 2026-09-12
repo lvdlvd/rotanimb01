@@ -65,6 +65,7 @@ const (
 	canPWMCal   = 0x45
 	canWind     = 0x46
 	canGPSCfg   = 0x48
+	canNoise    = 0x42
 )
 
 // gpsCfgPayload encodes GPS_CFG (canmsg.h 0x48): u8 enable, u8 feeder lag
@@ -79,6 +80,50 @@ func gpsCfgPayload(enable bool, lagMs int) ([]byte, error) {
 		p[0] = 1
 	}
 	p[1] = byte(lagMs / 10)
+	return p, nil
+}
+
+// noiseScale converts a multiplier on the harness's compiled-in datasheet
+// sigma to the u8 wire unit of 1/16, the encoding CMD_NOISE uses for all five
+// scale bytes. 16 = 1.0x = what the harness boots with.
+func noiseScale(what string, x float64) (byte, error) {
+	if x < 0 || x > 255.0/16.0 {
+		return 0, fmt.Errorf("noise %s scale %g out of range 0..15.9375", what, x)
+	}
+	return byte(math.Round(x * 16.0)), nil
+}
+
+// noisePayload encodes CMD_NOISE (canmsg.h 0x42): u8 gyro, accel, mag, baro
+// white-noise scale, u8 bias scale (turn-on bias and in-run walk), u8 flags
+// (bit0 re-draw the turn-on biases, bit1 zero them), zero-padded to 8 bytes.
+// It is a full-state frame like WIND: every field is applied on every frame.
+//
+// The baro scale is clamped to >= 1.0 and can only be turned up. A
+// bit-identical pressure stream reads as a DEAD sensor to both flight stacks
+// (ArduPilot's stuck-baro detector, PX4's DataValidator), so the harness
+// floors it too — this clamp only makes the host agree with what it gets.
+func noisePayload(gyro, accel, mag, baro, bias float64, redraw, zero bool) ([]byte, error) {
+	if baro < 1.0 {
+		fmt.Fprintf(os.Stderr, "noise: baro scale %g clamped to 1.0 (a noise-free baro reads as broken)\n", baro)
+		baro = 1.0
+	}
+	p := make([]byte, 8)
+	for i, s := range []struct {
+		what string
+		x    float64
+	}{{"gyro", gyro}, {"accel", accel}, {"mag", mag}, {"baro", baro}, {"bias", bias}} {
+		b, err := noiseScale(s.what, s.x)
+		if err != nil {
+			return nil, err
+		}
+		p[i] = b
+	}
+	if redraw {
+		p[5] |= 1
+	}
+	if zero {
+		p[5] |= 2
+	}
 	return p, nil
 }
 
@@ -245,6 +290,62 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 		fmt.Println("wind sent")
 		return nil
 
+	case "noise":
+		// scale the harness's sensor noise (canmsg.h 0x42). RAM only, like
+		// the cal and the engine preset: a harness reboot comes back at 1.0x.
+		usage := fmt.Errorf("drive noise default|off|<gyro> <accel> <mag> <baro> [bias] [redraw|zero]")
+		if len(args) < 1 {
+			return usage
+		}
+		g, a, m, b, bias := 1.0, 1.0, 1.0, 1.0, 1.0
+		var rest []string
+		switch args[0] {
+		case "default":
+			rest = args[1:]
+		case "off":
+			g, a, m, b, bias = 0, 0, 0, 0, 0 // baro floors at 1.0x, see noisePayload
+			rest = args[1:]
+		default:
+			if len(args) < 4 {
+				return usage
+			}
+			for i, v := range []*float64{&g, &a, &m, &b} {
+				x, err := strconv.ParseFloat(args[i], 64)
+				if err != nil {
+					return fmt.Errorf("drive noise: %q is not a scale: %w", args[i], err)
+				}
+				*v = x
+			}
+			rest = args[4:]
+			if len(rest) > 0 && rest[0] != "redraw" && rest[0] != "zero" {
+				x, err := strconv.ParseFloat(rest[0], 64)
+				if err != nil {
+					return fmt.Errorf("drive noise: %q is not a bias scale: %w", rest[0], err)
+				}
+				bias, rest = x, rest[1:]
+			}
+		}
+		var redraw, zero bool
+		for _, r := range rest {
+			switch r {
+			case "redraw":
+				redraw = true
+			case "zero":
+				zero = true
+			default:
+				return usage
+			}
+		}
+		p, err := noisePayload(g, a, m, b, bias, redraw, zero)
+		if err != nil {
+			return err
+		}
+		if err := harnessCmd(dev, canNoise, 12, p); err != nil {
+			return err
+		}
+		fmt.Printf("noise scales %v sent (RAM only: resend after a harness reboot)\n", p[:6])
+		return tailPrint(con, 2.5, 3)
+
 	case "engine":
 		// preset the FDM engine params (power_w 41, t_static_n 42,
 		// crit_alt_m 43). 912iS = the model's default, naturally aspirated;
@@ -361,5 +462,5 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 		}
 		return tailPrint(con, secs, 0)
 	}
-	return fmt.Errorf("drive: unknown command %q (mode|airstart|setpos|gps|wind|engine|param|cal|tail)", cmd)
+	return fmt.Errorf("drive: unknown command %q (mode|airstart|setpos|gps|wind|noise|engine|param|cal|tail)", cmd)
 }

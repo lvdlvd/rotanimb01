@@ -72,9 +72,10 @@ watching USB — macOS drops the CDC device and it looks like a crash.
 
 ## Known-different-from-real-life (do not chase these as bugs)
 
-- Harness sensors are noise-free (M7' not built). If EKF variances or
-  innovations misbehave from *too clean* data, that's the trigger to
-  build the noise layer.
+- (Superseded, F5-TESTREPORT night 3.) Harness sensors are noise-free
+  (M7' not built). The noise layer went in during the checkride and the
+  mission completed with it on; it is now runtime-scalable per sensor
+  (`bench drive noise`), on at datasheet levels by default.
 - Spiral mode over-converges (documented deviation; PARAM_SET tuning
   session planned — TRUTH vs EKF comparison unaffected).
 - (Superseded by the ground model, F5-TESTREPORT night 2.) No ground model: h<0 freezes the FDM (CRASHED on the ctl line,

@@ -203,6 +203,14 @@ and the parm file comments. The ones that cost the most:
 - **The default engine model is a naturally aspirated 100 hp Rotax
   912.** It cannot hold altitude above ~14,000 ft. High-altitude work
   needs `bench drive engine 915` (turbo), which is RAM-only too.
+- **Sensor noise scales are RAM-only as well** (`bench drive noise`): a
+  harness reboot comes back at 1.0×, the datasheet default — the safe
+  direction, but a scaled run that outlives a reboot is silently no longer
+  scaled. The 1 Hz console heartbeat carries the live scales as
+  `nz g/a/m/b/bias`, so check there rather than assuming. The baro scale
+  floors at 1.0× and can only be turned up: ArduPilot's stuck-baro detector
+  and PX4's `DataValidator` both declare a bit-identical stream unhealthy, so
+  a noise-free baro reads as a broken one.
 
 ## Known issues
 
@@ -213,10 +221,11 @@ and the parm file comments. The ones that cost the most:
   counters (healthy = 0, always). Cure: reset the harness, confirm the
   counters return to 0, then boot the DUT. What shifts the command byte
   has not been found; see [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md).
-- **CMD_NOISE (0x42) is accepted but not implemented.** The harness stores
-  the frame and never reads it: the sensor noise and gyro bias walk are
-  compiled-in constants (src/main.c, `noise()`), with no runtime mask or
-  level control. The dictionary entry is reserved for that.
+- **GPS and airspeed carry no noise**, only lag. The DroneCAN feeder sends
+  truth position with fixed covariances and a differential pressure computed
+  straight from truth IAS; `bench drive gps` models the transport lag and
+  nothing else. `bench drive noise` covers the four emulated SPI sensors
+  only. Modelling GNSS and pitot error is a separate project.
 - The spiral mode over-converges and the short period is overdamped
   with the default coefficients ([doc/FDM-TUNING.md](doc/FDM-TUNING.md) has the knobs).
 - tools/bench also speaks an experimental ArduPlane mode (HDGALT,

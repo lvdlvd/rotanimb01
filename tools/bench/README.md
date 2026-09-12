@@ -33,7 +33,7 @@ Against the DUT (MAVLink over TCP, `-c addr`, default `127.0.0.1:5760`):
 
 On the bench host, next to the USB devices:
 
-    bench drive     <mode|airstart|setpos|gps|wind|engine|param|cal|tail> [args]
+    bench drive     <mode|airstart|setpos|gps|wind|noise|engine|param|cal|tail> [args]
     bench serbridge [-dev path] [-port 5760]
     bench usbreset  [-dev path]                         (Linux, root)
 

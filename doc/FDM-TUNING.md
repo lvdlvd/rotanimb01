@@ -20,8 +20,10 @@ nosewheel washout, brakes below 15% power, crash-repark), the servo lag
 (τ 60 ms, 300°/s rate limit, throttle τ 0.3 s — controls.c), and the
 sensor noise levels (src/main.c, `noise()`: gyro 0.2°/s white + a
 per-boot bias and a random walk, accel 5 mg, mag 20 nT, baro ±1 Pa
-dither). The noise is always on; CMD_NOISE 0x42 in the dictionary is
-reserved (the harness stores the frame and does nothing with it).
+dither). The noise is always on at those levels; CMD_NOISE 0x42 scales
+them at runtime (`bench drive noise`, RAM only, baro floored at 1.0×)
+but the levels themselves stay compiled in — see "Sensor-side fidelity
+knobs" below.
 
 ## The parameter table (PARAM_SET index → field)
 
@@ -134,10 +136,21 @@ not zero.
 
 ## Sensor-side fidelity knobs
 
-- Noise and bias walk: constants in `src/main.c` (search `noise(`),
-  compiled in, no runtime switch. Do not be tempted to compile it out:
-  bit-identical pressure trips ArduPilot's stuck-baro detector, and a
-  noise-free bench let a DCM-drift bug hide for nights.
+- Noise and bias walk: the *levels* are constants in `src/main.c` (search
+  `noise(`); CMD_NOISE 0x42 scales them at runtime, `drive noise
+  default|off|<g> <a> <m> <b> [bias] [redraw|zero]`, RAM only. Do not be
+  tempted to run the bench quiet: bit-identical pressure trips ArduPilot's
+  stuck-baro detector (PX4's `DataValidator` calls a source stale after 100
+  identical samples), and a noise-free bench let a DCM-drift bug hide for
+  nights. That is why the baro scale is floored at 1.0× and only turns up —
+  the other four may go to zero, and `drive noise off` lands on that floor
+  rather than failing.
+- Behaviour change when CMD_NOISE went in: the baro dither moved out of
+  `baro_commit` (sensors.c, where it was the one sensor whose noise lived in
+  the quantization layer) into `sample_baro` in main.c, beside the other
+  three. RMS is preserved — σ 0.58 Pa against the ±1 Pa uniform it replaced —
+  but the distribution is now triangular like the rest, so peak excursions
+  reach ±1.4 Pa instead of a hard ±1. Altitude effect is a few cm.
 - GPS lag: `drive gps 1 <ms>` (default 150 — a zero-lag GPS makes HITL
   kinder than reality).
 - Sensor rates and ranges follow the DUT's own configuration writes

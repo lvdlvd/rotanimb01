@@ -15,7 +15,7 @@
 //	bench watch     [-c addr] [-dur 2m]
 //	bench mode      [-c addr] hdgalt                 (experimental fork mode, README)
 //	bench hdgaltcmd [-c addr] [-hdg -trate -alt -crate]
-//	bench drive     <mode|airstart|setpos|gps|wind|engine|param|cal|tail> [args]   (on the bench host)
+//	bench drive     <mode|airstart|setpos|gps|wind|noise|engine|param|cal|tail> [args]   (on the bench host)
 //	bench serbridge [-dev path] [-port 5760]                                 (on the bench host)
 //	bench usbreset  [-dev path]                        (Linux, root: USBDEVFS_RESET of a wedged CDC)
 //
@@ -186,7 +186,7 @@ func main() {
 		fs.Parse(args)
 		rest := fs.Args()
 		if len(rest) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: bench drive <mode|airstart|setpos|gps|wind|engine|param|cal|tail> [args]")
+			fmt.Fprintln(os.Stderr, "usage: bench drive <mode|airstart|setpos|gps|wind|noise|engine|param|cal|tail> [args]")
 			os.Exit(2)
 		}
 		err = cmdDrive(rest[0], *dev, *con, rest[1:])

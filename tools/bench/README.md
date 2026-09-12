@@ -16,7 +16,7 @@ dropped by ArduPilot.
 Validation status: codec tests + full SITL campaign (params/fly/
 loiter/probe/tune) all pass with numbers identical to the python
 originals; the pi-side `drive`/`serbridge` paths still await an
-on-hardware run (the binary is staged at slon:~/bench).
+on-hardware run.
 
 ## Subcommands
 
@@ -39,7 +39,7 @@ names don't resolve through Go/python sockets on macOS).
   airspeed backend. `-reboot` latches the ones that need it.
 - **fly** is the end-to-end check: TAKEOFF-mode departure, climb,
   60 s FBWA hands-off at cruise throttle, PASS/MARGINAL verdict.
-- **loiter** flies the two owner-defined legs (standard 3°/s: 29 m/s
+- **loiter** flies the two reference legs (standard 3°/s: 29 m/s
   R553; fast 6°/s: 38 m/s R363) with demand-vs-achieved stats and a
   circle fit over the last 120 s; CSV per leg. `-takeoff` departs
   first, else it assumes the aircraft is already airborne.

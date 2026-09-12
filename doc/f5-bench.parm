@@ -49,7 +49,7 @@ ARMING_CRSDP_IGN 1
 
 # --- Kitfox airframe basics (first tuning pass, bench night 2):
 # default loiter radius 60 m at default speeds demanded 70-deg banks
-AIRSPEED_CRUISE  38   # the model's true cruise (45% throttle) = owner's 90 kt
+AIRSPEED_CRUISE  38   # the model's true cruise (45% throttle) = the reference aircraft's 90 kt
 AIRSPEED_MIN     21
 AIRSPEED_MAX     46
 WP_LOITER_RAD    553  # standard-loiter default; see leg definitions below
@@ -114,7 +114,7 @@ TKOFF_THR_MAX    100
 # until GPS speed exceeds it (hand-launch feature) = deadlock
 TKOFF_THR_MINSPD 0
 
-# --- loiter leg definitions (owner): standard = 3 deg/s at
+# --- loiter leg definitions (reference legs): standard = 3 deg/s at
 # (cruise+stall)/2 = 29 m/s -> R 553 m (bank 8.8); fast = 6 deg/s at
 # cruise 38 -> R 363 m (bank 22). WP_LOITER_RAD latches at LOITER entry;
 # DO_CHANGE_SPEED is inert in LOITER — set AIRSPEED_CRUISE live instead.

@@ -13,7 +13,7 @@
 //	bench disarm    [-c addr]        (force)
 //	bench reboot    [-c addr]
 //	bench watch     [-c addr] [-dur 2m]
-//	bench drive     <mode|airstart|setpos|gps|wind|engine|cal|tail> [args]   (on the bench host)
+//	bench drive     <mode|airstart|setpos|gps|wind|engine|param|cal|tail> [args]   (on the bench host)
 //	bench serbridge [-dev path] [-port 5760]                                 (on the bench host)
 //
 // Defaults: -c 127.0.0.1:5760 (SITL). The bench is the same port through
@@ -183,7 +183,7 @@ func main() {
 		fs.Parse(args)
 		rest := fs.Args()
 		if len(rest) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: bench drive <mode|airstart|setpos|gps|wind|engine|cal|tail> [args]")
+			fmt.Fprintln(os.Stderr, "usage: bench drive <mode|airstart|setpos|gps|wind|engine|param|cal|tail> [args]")
 			os.Exit(2)
 		}
 		err = cmdDrive(rest[0], *dev, *con, rest[1:])

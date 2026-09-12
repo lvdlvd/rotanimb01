@@ -22,8 +22,8 @@ LOITER in wind, TECS climb — flown entirely on the bench.
 DRDY lines stay unconnected (this config polls). Only PWM 1-4 (AETR)
 matter for flight.
 
-Ports on the mac: `/dev/cu.usbmodem11301` = ArduPlane MAVLink (CN13),
-`/dev/cu.usbmodem11103` = ST-Link VCP. Harness cockpit = rb01tool on
+Ports on a mac: one `/dev/cu.usbmodem*` = ArduPlane MAVLink (CN13),
+another = the ST-Link VCP. Harness cockpit = rb01tool on
 its own usbmodem port. Do NOT halt/resume the F767 under openocd while
 watching USB — macOS drops the CDC device and it looks like a crash.
 
@@ -77,7 +77,7 @@ watching USB — macOS drops the CDC device and it looks like a crash.
   build the noise layer.
 - Spiral mode over-converges (documented deviation; PARAM_SET tuning
   session planned — TRUTH vs EKF comparison unaffected).
-- No ground model: h<0 freezes the FDM (CRASHED on the ctl line,
+- (Superseded by the ground model, F5-TESTREPORT night 2.) No ground model: h<0 freezes the FDM (CRASHED on the ctl line,
   rb01tool `i`/FDM_INIT to reset). The freeze serves parked REST truth
   (level-at-frozen-attitude -1 g, zero rates), so a mode-1 "ground
   start" is really an immediate 1 cm crash-freeze that behaves like a

@@ -1,0 +1,374 @@
+From e54640a7301d35594f3c3833b28b3cfa96af9da6 Mon Sep 17 00:00:00 2001
+From: Luuk van Dijk <lvd@mndmttr.net>
+Date: Mon, 13 Jul 2026 22:02:47 +0200
+Subject: [PATCH 1/2] =?UTF-8?q?NucleoF767ZI:=20HITL=20bench=20board=20?=
+ =?UTF-8?q?=E2=80=94=20stock=20ArduPlane=20against=20the=20rotanimb01=20ha?=
+ =?UTF-8?q?rness?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Full ArduPlane on the Nucleo-F767ZI (2 MB), sensors on SPI3 (BMI088 +
+BMP388 + RM3100, MODE0 SPIDEVs so the emulated and real stacks both
+work), PWM 1-8 on TIM3/TIM4, ADC fully disabled for the bench, 8 MHz
+MCO HSE bypass, SERIAL0 on the user OTG USB. CAN1 on PD0/PD1 for the
+harness's DroneCAN GPS/airspeed feed (runtime: CAN_P1_DRIVER 1,
+GPS_TYPE 9, ARSPD_TYPE 8). Bootloader owns flash 0..96K, app at
+0x08018000; storage in flash sectors 1-2.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ Tools/bootloaders/NucleoF767ZI_bl.bin         | Bin 0 -> 14156 bytes
+ .../hwdef/NucleoF767ZI/hwdef-bl.dat           |  28 +++++
+ .../hwdef/NucleoF767ZI/hwdef.dat              |  99 ++++++++++++++++++
+ 3 files changed, 127 insertions(+)
+ create mode 100755 Tools/bootloaders/NucleoF767ZI_bl.bin
+ create mode 100644 libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef-bl.dat
+ create mode 100644 libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef.dat
+
+diff --git a/Tools/bootloaders/NucleoF767ZI_bl.bin b/Tools/bootloaders/NucleoF767ZI_bl.bin
+new file mode 100755
+index 0000000000000000000000000000000000000000..38e8b6c8d3550f763f97e6f850aad808d46fd20e
+GIT binary patch
+literal 14156
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef-bl.dat b/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef-bl.dat
+new file mode 100644
+index 0000000000..789c06a2b0
+--- /dev/null
++++ b/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef-bl.dat
+@@ -0,0 +1,28 @@
++# bootloader for the NUCLEO-F767ZI HITL DUT (see hwdef.dat)
++
++MCU STM32F7xx STM32F767xx
++APJ_BOARD_ID 1498
++
++OSCILLATOR_HZ 8000000
++define STM32_HSE_BYPASS
++
++FLASH_SIZE_KB 2048
++# bootloader owns 0..96K (sector 0 code, sectors 1-2 are the param storage)
++FLASH_BOOTLOADER_LOAD_KB 96
++
++PA11 OTG_FS_DM OTG1
++PA12 OTG_FS_DP OTG1
++
++PA13 JTMS-SWDIO SWD
++PA14 JTCK-SWCLK SWD
++
++SERIAL_ORDER OTG1
++
++PB0 LED_BOOTLOADER OUTPUT LOW
++define HAL_LED_ON 0
++
++# CS pins held high while in the bootloader
++PD3 ACCEL_CS CS
++PD4 GYRO_CS CS
++PD5 BARO_CS CS
++PD6 MAG_CS CS
+diff --git a/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef.dat b/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef.dat
+new file mode 100644
+index 0000000000..f21c9656a4
+--- /dev/null
++++ b/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef.dat
+@@ -0,0 +1,99 @@
++# NUCLEO-F767ZI as a HITL DUT: full ArduPlane (EKF and all) with the
++# BMI088 + BMP390 + RM3100 sensor stack on one external SPI bus — wired
++# either to real sensor breakouts or to a register-level bus emulator.
++# All SPIDEVs deliberately MODE0: the real parts auto-detect the mode per
++# transaction, a hardware bus emulator cannot. Sensor bus on SPI3 and CS
++# on port D: the Nucleo's ethernet PHY owns PA1/PA2/PA7 (RMII, PHY has
++# its own crystal and drives CRS_DV) — SPI1 is unusable here.
++
++MCU STM32F7xx STM32F767xx
++
++# local bench board: spare numeric id
++APJ_BOARD_ID 1498
++
++# 8 MHz from the ST-Link MCO
++OSCILLATOR_HZ 8000000
++define STM32_HSE_BYPASS
++
++STM32_ST_USE_TIMER 5
++
++FLASH_SIZE_KB 2048
++FLASH_RESERVE_START_KB 96
++
++# parameters in flash sector 1
++define STORAGE_FLASH_PAGE 1
++define HAL_STORAGE_SIZE 32768
++
++# ---------------------- serial -------------------------
++# SERIAL0 = the Nucleo's user USB (CN13), MAVLink to the GCS
++SERIAL_ORDER OTG1 USART3 EMPTY EMPTY
++
++PA11 OTG_FS_DM OTG1
++PA12 OTG_FS_DP OTG1
++
++# USART3 PD8/PD9 = the ST-Link VCP (telem2 / debug)
++PD8 USART3_TX USART3
++PD9 USART3_RX USART3
++
++PA13 JTMS-SWDIO SWD
++PA14 JTCK-SWCLK SWD
++
++# ---------------------- sensor bus ----------------------
++# SPI3 on the Zio/morpho headers, CS on port D — clear of RMII and OTG
++PB3 SPI3_SCK SPI3
++PB4 SPI3_MISO SPI3
++PB5 SPI3_MOSI SPI3
++
++PD3 ACCEL_CS CS
++PD4 GYRO_CS CS
++PD5 BARO_CS CS
++PD6 MAG_CS CS
++
++# MODE0 everywhere (see header); gyro + mag capped at 1 MHz (RM3100 limit,
++# and the emulator's no-dummy protocol domain), accel/baro may burst faster
++SPIDEV bmi088_g SPI3 DEVID1 GYRO_CS  MODE0 1*MHZ 1*MHZ
++SPIDEV bmi088_a SPI3 DEVID2 ACCEL_CS MODE0 1*MHZ 4*MHZ
++SPIDEV bmp390   SPI3 DEVID3 BARO_CS  MODE0 1*MHZ 4*MHZ
++SPIDEV rm3100   SPI3 DEVID4 MAG_CS   MODE0 1*MHZ 1*MHZ
++
++IMU BMI088 SPI:bmi088_a SPI:bmi088_g ROTATION_NONE
++BARO BMP388 SPI:bmp390
++COMPASS RM3100 SPI:rm3100 false ROTATION_NONE
++define HAL_COMPASS_MAX_SENSORS 1
++
++define HAL_DEFAULT_INS_FAST_SAMPLE 0
++
++# ---------------------- servo PWM -----------------------
++# eight outputs for the harness's TIM2/TIM3 capture
++PC6  TIM3_CH1 TIM3 PWM(1) GPIO(50)
++PC7  TIM3_CH2 TIM3 PWM(2) GPIO(51)
++PC8  TIM3_CH3 TIM3 PWM(3) GPIO(52)
++PC9  TIM3_CH4 TIM3 PWM(4) GPIO(53)
++PD12 TIM4_CH1 TIM4 PWM(5) GPIO(54)
++PD13 TIM4_CH2 TIM4 PWM(6) GPIO(55)
++PD14 TIM4_CH3 TIM4 PWM(7) GPIO(56)
++PD15 TIM4_CH4 TIM4 PWM(8) GPIO(57)
++
++# ---------------------- misc -----------------------------
++# the Nucleo's LEDs
++PB0 LED1 OUTPUT LOW GPIO(90)
++PB7 LED2 OUTPUT LOW GPIO(91)
++define HAL_GPIO_A_LED_PIN 90
++
++# no battery monitor / no ADC on the bench
++define HAL_BATT_MONITOR_DEFAULT 0
++define HAL_USE_ADC FALSE
++define STM32_ADC_USE_ADC1 FALSE
++define HAL_DISABLE_ADC_DRIVER TRUE
++define HAL_WITH_MCU_MONITORING 0
++
++# treat as plane-first bench board
++env AUTOBUILD_TARGETS Plane
++
++# CAN1 on PD0/PD1 (Zio CN9; free of the ethernet PHY, SPI3 and the PWM
++# banks): DroneCAN GPS + airspeed from the HITL feeder (rb01tool -gps via
++# the canusb bridge). Runtime: CAN_P1_DRIVER 1, GPS_TYPE 9 (DroneCAN),
++# ARSPD_TYPE 8 (DroneCAN).
++PD0 CAN1_RX CAN1
++PD1 CAN1_TX CAN1
++define HAL_NUM_CAN_IFACES 1
+-- 
+2.50.1 (Apple Git-155)
+

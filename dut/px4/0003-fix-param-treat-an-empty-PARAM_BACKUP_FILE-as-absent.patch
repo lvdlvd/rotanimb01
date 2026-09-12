@@ -1,0 +1,35 @@
+From 9f7ca4305c4436f5be33d82be436424e8f182009 Mon Sep 17 00:00:00 2001
+From: Luuk van Dijk <lvd@mndmttr.net>
+Date: Tue, 1 Sep 2026 07:03:47 +0200
+Subject: [PATCH] fix(param): treat an empty PARAM_BACKUP_FILE as absent
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Boards without an SD card leave $PARAM_BACKUP_FILE unset and NSH
+still passes an empty string through, which open() rejects with
+ENXIO rather than ENOENT — read as a broken backup file at every
+boot. An empty name means no backup.
+---
+ src/systemcmds/param/param.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/systemcmds/param/param.cpp b/src/systemcmds/param/param.cpp
+index 52318a4a04..4197da101d 100644
+--- a/src/systemcmds/param/param.cpp
++++ b/src/systemcmds/param/param.cpp
+@@ -602,7 +602,10 @@ do_load_or_init(const char *backup_file_name)
+ 
+ 	int fd = -1;
+ 
+-	if (backup_file_name) {
++	/* An empty name is "no backup", not a broken one: boards without an SD card
++	 * leave $PARAM_BACKUP_FILE unset and NSH still passes "" through, which
++	 * open() rejects with ENXIO rather than ENOENT. */
++	if (backup_file_name && backup_file_name[0] != '\0') {
+ 		fd = open(backup_file_name, O_RDONLY);
+ 
+ 		if (fd < 0 && errno != ENOENT) {
+-- 
+2.50.1 (Apple Git-155)
+

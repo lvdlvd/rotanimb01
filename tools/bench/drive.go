@@ -42,7 +42,19 @@ func defHarnCon() string {
 }
 
 func defDutDev() string {
-	return devDefault("ROTANIMB01_DUT", "/dev/serial/by-id/usb-ArduPilot_*-if00")
+	if v := os.Getenv("ROTANIMB01_DUT"); v != "" {
+		return v
+	}
+	// either autopilot's CDC name, whichever one is attached
+	var m []string
+	for _, g := range []string{"/dev/serial/by-id/usb-ArduPilot_*-if00", "/dev/serial/by-id/usb-PX4_*-if00"} {
+		hits, _ := filepath.Glob(g)
+		m = append(m, hits...)
+	}
+	if len(m) == 1 {
+		return m[0]
+	}
+	return "/dev/serial/by-id/usb-{ArduPilot,PX4}_*-if00"
 }
 
 const (
@@ -260,6 +272,30 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 		}
 		fmt.Printf("engine %s set\n", args[0])
 		return nil
+
+	case "param":
+		// any FDM parameter by table index (fdm/fdm.h, doc/FDM-TUNING.md);
+		// the harness echoes PARAM_VAL on the pseudocan link, which only a
+		// reader of that port (rb01tool) sees — this side tails the console
+		if len(args) < 2 {
+			return fmt.Errorf("drive param <index> <value>")
+		}
+		idx, err := strconv.Atoi(args[0])
+		if err != nil || idx < 0 || idx >= 0x8000 {
+			return fmt.Errorf("drive param: index %q", args[0])
+		}
+		v, err := strconv.ParseFloat(args[1], 32)
+		if err != nil {
+			return fmt.Errorf("drive param: value %q: %v", args[1], err)
+		}
+		p := make([]byte, 8)
+		binary.BigEndian.PutUint16(p[0:], uint16(idx))
+		binary.BigEndian.PutUint32(p[2:], math.Float32bits(float32(v)))
+		if err := harnessCmd(dev, canParam, 11, p); err != nil {
+			return err
+		}
+		fmt.Printf("param %d = %g sent\n", idx, v)
+		return tailPrint(con, 2.5, 2)
 
 	case "cal":
 		// PWM_CAL deflections, per autopilot. The harness default cal

@@ -1,9 +1,9 @@
 # HITL sensor simulator for ArduPlane — design & implementation plan (v2)
 
 Status: design, topology settled. Target: STM32G474RET6 (LQFP64,
-Nucleo-G474RE / 64-pin breakouts on hand), built on [N]Array. This is
-the "optional test harness application (based on same STM32 MCU)" step
-of the n-array workflow, and the first consumer of several planned lib
+Nucleo-G474RE / 64-pin breakouts on hand), bare metal on a small in-tree
+support library (nlib/). It was the first consumer of several of that
+library's
 drivers (fdcan, pwm capture, exti, SPI slave).
 
 **v3 (2026-07-08, post-M3 measurement): back to v1's single-SPI topology,
@@ -150,7 +150,7 @@ CPU load sanity check: ~30 k byte-IRQs/s × ~100 cycles ≈ 2 % of
 170 MHz. The per-byte engine is not the bottleneck; the deadline is —
 and M3 measures it before anything depends on it.
 
-## Pinout (draft — run `narray -part STM32G474RET6 -pinfmt` on the real board.c)
+## Pinout (draft — the as-built table is the annotated pin list in src/board.c)
 
 | Signal     | Pin               | Function       | Notes                                          |
 | ---------- | ----------------- | -------------- | ---------------------------------------------- |
@@ -436,9 +436,9 @@ the M7 software upgrade — uniquely elegant here because the PWM capture
 front-end doubles as the frequency reference; keep 3 documented for
 deterministic-replay campaigns.
 
-## What gets factored into n-array `lib/` (and what doesn't)
+## What is library code (nlib/) and what is harness code
 
-Into `lib/`:
+Into the library:
 
 - **`lib/fdcan.{h,c}`** — already on the README feature list. Classic
   first, FD-capable layout from day one; message-RAM helpers from the
@@ -478,7 +478,7 @@ Nucleo runs a "DUT-mimic" master firmware built on the existing
 transaction traces* over real inter-board wiring. Rough sizes are
 new-code lines.
 
-- **M0 — skeleton (small).** board.c pinout (narray -pinfmt'd), clock,
+- **M0 — skeleton (small).** board.c pinout, clock,
   console, vector-table manifest, heartbeat. Clone of hello.
 - **M1 — `lib/pwmin` (~250).** TIM2/TIM3 capture. Self-test: TIM4/TIM8
   generate known PWM on jumpered pins; assert width/period over the

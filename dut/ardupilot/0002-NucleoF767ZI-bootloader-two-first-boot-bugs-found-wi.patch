@@ -1,0 +1,142 @@
+From a734c549de88e01499b1e785abd3451232e6ad13 Mon Sep 17 00:00:00 2001
+From: Luuk van Dijk <lvd@mndmttr.net>
+Date: Mon, 13 Jul 2026 23:13:25 +0200
+Subject: [PATCH 2/2] NucleoF767ZI bootloader: two first-boot bugs, found with
+ a debugger
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FLASH_RESERVE_START_KB 0 in hwdef-bl: the generator default of 16
+linked the bootloader at +16K while it was flashed at 0x08000000 —
+the vector table pointed 16K past the code and the first instruction
+after reset was erased flash (UNDEFINSTR HardFault, read off the
+stacked exception frame).
+
+AP_Bootloader's own strlen/memset get empty asm barriers in their
+loops: gcc 15's loop-idiom recognition compiled strlen's body into a
+tail call to strlen — itself ('strlen: b.w strlen'), an infinite loop
+during USB descriptor setup, before enumeration and before the
+boot-the-app timeout could ever run. Harmless on the pinned gcc 10;
+this applies to any board built with a newer toolchain and is worth
+upstreaming.
+
+With both fixed: bootloader enumerates on CN13, times out, boots the
+app; ArduPlane runs and presents SERIAL0 on the same port.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ Tools/AP_Bootloader/support.cpp               |  13 +++++++++++--
+ Tools/bootloaders/NucleoF767ZI_bl.bin         | Bin 14156 -> 14172 bytes
+ .../hwdef/NucleoF767ZI/hwdef-bl.dat           |   8 +++++++-
+ 3 files changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/Tools/AP_Bootloader/support.cpp b/Tools/AP_Bootloader/support.cpp
+index c112a51773..b42f9d5206 100644
+--- a/Tools/AP_Bootloader/support.cpp
++++ b/Tools/AP_Bootloader/support.cpp
+@@ -425,20 +425,29 @@ int strcmp(const char *s1, const char *s2)
+     return (*s1 - *s2);
+ }
+ 
+-//simple variant of std c function to reduce used flash space
++//simple variant of std c function to reduce used flash space.
++// The empty asm in the loop stops the compiler's loop-idiom recognition
++// from turning the body into a call to strlen — i.e. to itself, an
++// infinite loop (observed with gcc 15: 'strlen: b.w strlen').
+ size_t strlen(const char *s1)
+ {
+     size_t ret = 0;
+-    while (*s1++) ret++;
++    while (*s1++) {
++        ret++;
++        __asm__ volatile("");
++    }
+     return ret;
+ }
+ 
+ //simple variant of std c function to reduce used flash space
++// (same idiom-recognition guard as strlen: gcc can turn this loop
++// into a call to memset)
+ void *memset(void *s, int c, size_t n)
+ {
+     uint8_t *b = (uint8_t *)s;
+     while (n--) {
+         *b++ = c;
++        __asm__ volatile("");
+     }
+     return s;
+ }
+diff --git a/Tools/bootloaders/NucleoF767ZI_bl.bin b/Tools/bootloaders/NucleoF767ZI_bl.bin
+index 38e8b6c8d3550f763f97e6f850aad808d46fd20e..d5380adfb4458cddefd228c0c7af5f7f5d19f078 100755
+GIT binary patch
+delta 1796
+zcmb_dYfM~46h1S%cXwRe<yFe73m3M?(u7yJTc~ZV5PFwK#bR4hDN$@{+*m_aO&Ueb
+z($ojhD#VGEQXA8xK}viSZb@7cgi=s!OhpZiXzPPSY9&pF3W23%*K-X``QZ;txXG9A
+zJ16IynK^T2_nW%Qbv`grnNVPcWneUCd2!3BwHV`D*1}5*zL>X?oA9k<F<?(P|7Shl
+zGTOfM^ee5Yf$|{nO5P9^gZz2wmKssr=6y7Mv$szl4oF1+Fm@e&13<0&@`3688bmE3
+zXFdAxBzM764bH;h`QTL|D(B(X;8lQvZV;hcL})=tC1N6IRNMWw@)JcdBP8!c(W;Tc
+zn~g4ziTEUVZzqU@b0AdymSK1Jwp-wcDSLRj{@LgfA`18oLj^JL2aMIEpC2<`mKq3?
+z8+g5xM6U5;Qeybtd2lrU8~+Z*SMc-FKA#ELIm9M2uqo*-M$tZZ53tV|Fe`E%;!%Vi
+za{##sAz6TBF6Qk-{X6PAww|-J-hXL*&2TD*W)B6y38JL|L_60^FOjEtw)p^2_;K^T
+z7z42V4k|x`*rNd3f!L++D7HVoe*VJWZ_p#9P8Gz<^Wbb9A<essLG<t@wwLs4ldO;=
+ze-r@c*6E>7<<w9LZ3ppwAgP3=fOuujUIN&Ha!YAgM#$0vVj=*di+^Z|F%9B7+N1Cu
+zOA;~jG0WS&o<L56?8$39T*Suk76J~BR7~=^XZp7~YH$AF?S;NGxV^IoB6jq^6x6~@
+ze-3!OZe70%x<$klKY&!8;E~D`8;>U(E}~-*#YDXB2ifb^bM+bp-A2{?P)4WIBNzAn
+zS@0kcNBvF{8bs7<lVQ1p{K4(ktr6fDsIvIuRIi)l1#p6Rtu>3NyvdqR+W1%2G!o0N
+zTiy3P9%7|3w&%ORc-{AN#sY_+h5_UV-0}z5$$lr5Pbpfp?KxtpLHkfRu+ui}Quu^q
+zIf8a0;#EcaGG>^NLEaR*h33Zci?Jo7fyc&W&}M}f#XUs~T1Q-zA!WM@n4&)kWN&xt
+z8A)a8DwUiDF)&BkL$iK<B{5|B5lfy``1qQvLV|KLCag=Rav17j)YGU}qu!3%i_KuF
+zO%2Uj=7zc)FUV?`e&pVDYOYF@;Or!?v`3Q}{-k{qInPhpGs(yNTl>bSWX#uVq$A{M
+zk*p{@A*s#g!F`ePopUmH-5wXen6#cE(c~&5tvdM^N^A1@{i&_A#id<JJxJ&&msYWM
+zm>Cyl7eZP>W(OhZd?@RNWgFHlLzHIoFS7rl!!F*D^RtA5`iMb$Gxq|0Ou{x!+3+zS
+z$0O1Zk%$HKT|;a{P4JiF&KJai>&M$4Nu%=Txj04mxAWc_U?&rSZ9z^!7#4%Sj^tfR
+zs>vP+?6pY#lafT4i_a@%beD^(t}2T?8rWzIUgc`7%~eK>A^f=55Vv*|7b!IYj3ZYf
+W3uHK|S7m@E+{P2}&JFSAMc+Trtd3d$
+
+delta 1770
+zcmb`Ge@xVM7{{OIbN4+yJ3LU72@>#y6FuEPekRTz{JOpzKf;hfOIc%%jH%g~cVt$B
+zvXw1M^0OSmSgSvZnwIhfCoBYPZo>QnbJb8wveL?x9}v1bXm>r=Xz)jW(8g`AJ@4mp
+z&-4C%KhNj$y}9qoz6LNc74v}`=E0zIes%NlnyG1+*MsL8K679pU!q|l&45?d{ZGG!
+zd5nGT?iX4!L%#5%Q`sG0@`5<P3YAw${VDp`>P@@*f|mmliCp0PcNhgAO>43qcyPU%
+zs3B6*X`Oa5i%2xs@-9yK@1iW3f?NK(0NGt21Jfu^`xOo4sNblycZZd<<wp)<MqB=}
+z;k@x9S)ii)*uUs3$a*ixT=ABnGCXG*tdYfACl2jj>Oh$;?i<RmKx{E?$5C<8cvI;|
+zuJ(&VN*w+uPAW0sl~Z7C`ltRKs&|Mlm7NV5@Bw0DA@H$BX8D@(fg<3aJAhj#W)M#h
+z!J0i3j}b~S@Z_1k3erE2{x=Wy%=P;(9eiduQv;q?{9psw+z9eRp_^XBTCpx<52lFL
+zke!hQz-z5c-Ak0ZfZGX&OGNP6XxG%xgE!dGBAZ4tnF3qOFg8`%L3WB`d<XXE_jn%0
+zf8YaK&cvn9)WkpnYX|wRFV4XdK)&pabpVZ^#9S0=4Varjj`~2J67QQMP3P%5Ds_n-
+za~z@=F~8l==}T=?>oSfU&gUa^3O;L{V#kcG$^IN`&G<EEFZ7+E*Xtxu7Wcpy)WBqa
+zD%3d(gZelGGnC(U11Kdc>Xee0BdseA=d+Q;c9f0XpgIeKy+M!cE~6Im=$f;(I@R9$
+zOLi{Grf!>w5|l3eUT7NPEfH(UF$O&TKC#!5f~BI>vK~)~YnCL86+TNLJ|*(PV$4l6
+zr+yn#n_c>@u;<YH80GG*z}w37+u?T<b0g(15eHrRSCN+yheYf0%`EA0aecW1Ul-P>
+zHS9H)D2sX;3-ohQ5r%|ZH}Fil&=b_;>}olqXk1&S;U^$3da*s==@Y-k1WZ@x-*%Vy
+z<DrzwNt)s&YFN9Pj+nGP*i70?C8eaDv{kN!X#vk-@1+jwK~)Rwj?$dHYqc~DGyR^i
+z0N5T}MRk%s5O0^FEz<m+X|X?cBMyqwvB}sWZp3bgSW0d|#~4DLknuK`SQYnCST(&Z
+zmQ;9Ea28g(#r3#!Mj<S|ih{l?{(HtspBGwU3p?u8Zzt9xYj*3~S6=2uzsKO!S0#Un
+zm@KZQ+&6C^-z~)EXT{LE-`E#!aW3_SLYHz|fqo)wh&|~m1O79SK*O~V(S$;b(b{)J
+zGHHa_-#Cq;pH6x>iK*w)=*A#}H>-iaw*z<@#Yn<1Q{G!HE@UQ}mXrg3p<LX_jAMVf
+zgej|-Iox7fR+V{41@OU2I@l_`BdZvXua8<eNcKfWfNv<4Q~Ze{oCx}HpcEwSMGQO~
+I9Wt}_H^LUdQvd(}
+
+diff --git a/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef-bl.dat b/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef-bl.dat
+index 789c06a2b0..2e8a903589 100644
+--- a/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef-bl.dat
++++ b/libraries/AP_HAL_ChibiOS/hwdef/NucleoF767ZI/hwdef-bl.dat
+@@ -7,7 +7,13 @@ OSCILLATOR_HZ 8000000
+ define STM32_HSE_BYPASS
+ 
+ FLASH_SIZE_KB 2048
+-# bootloader owns 0..96K (sector 0 code, sectors 1-2 are the param storage)
++# bootloader owns 0..96K (sector 0 code, sectors 1-2 are the param storage).
++# FLASH_RESERVE_START_KB 0 places the bootloader itself at 0x08000000 — the
++# generator's default of 16 links it at +16K, whose vector table then points
++# 16K past the flashed code: reset lands in erased flash, UNDEFINSTR HardFault
++# on the first instruction (found the hard way with openocd + the stacked
++# exception frame).
++FLASH_RESERVE_START_KB 0
+ FLASH_BOOTLOADER_LOAD_KB 96
+ 
+ PA11 OTG_FS_DM OTG1
+-- 
+2.50.1 (Apple Git-155)
+

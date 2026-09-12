@@ -1,0 +1,1751 @@
+From 6e43507c96247caaecaba1aff96fec31b8c824ff Mon Sep 17 00:00:00 2001
+From: Luuk van Dijk <lvd@mndmttr.net>
+Date: Tue, 1 Sep 2026 07:04:00 +0200
+Subject: [PATCH] feat(boards): add st/nucleo-f767zi
+
+NuttX board target for the NUCLEO-F767ZI (no upstream target exists;
+nearest relatives are the FMUv5/F765 boards). SPI4 sensor bus with
+BMI088 accel/gyro and BMP388 baro on SPI, RM3100 mag, single CAN
+(BOARD_UAVCAN_INTERFACES=1: the board wires only CAN1, and the
+default of 2 costs every uavcan init a failed second-interface
+bring-up), console + NSH on the ST-LINK VCP, CDC/ACM MAVLink. No SD
+card; params live in internal flash (see the param backup fix).
+---
+ boards/st/nucleo-f767zi/default.px4board      |  56 ++++
+ boards/st/nucleo-f767zi/firmware.prototype    |  13 +
+ .../st/nucleo-f767zi/init/rc.board_defaults   |  26 ++
+ boards/st/nucleo-f767zi/init/rc.board_sensors |  34 +++
+ .../nuttx-config/include/board.h              | 227 +++++++++++++++++
+ .../nuttx-config/include/board_dma_map.h      |  66 +++++
+ .../nucleo-f767zi/nuttx-config/nsh/defconfig  | 203 +++++++++++++++
+ .../nuttx-config/scripts/script.ld            | 180 +++++++++++++
+ boards/st/nucleo-f767zi/src/CMakeLists.txt    |  50 ++++
+ boards/st/nucleo-f767zi/src/board_config.h    | 186 ++++++++++++++
+ boards/st/nucleo-f767zi/src/init.c            | 240 ++++++++++++++++++
+ boards/st/nucleo-f767zi/src/led.c             | 103 ++++++++
+ boards/st/nucleo-f767zi/src/spi.cpp           |  62 +++++
+ boards/st/nucleo-f767zi/src/timer_config.cpp  |  61 +++++
+ boards/st/nucleo-f767zi/src/usb.c             | 106 ++++++++
+ 15 files changed, 1613 insertions(+)
+ create mode 100644 boards/st/nucleo-f767zi/default.px4board
+ create mode 100644 boards/st/nucleo-f767zi/firmware.prototype
+ create mode 100644 boards/st/nucleo-f767zi/init/rc.board_defaults
+ create mode 100644 boards/st/nucleo-f767zi/init/rc.board_sensors
+ create mode 100644 boards/st/nucleo-f767zi/nuttx-config/include/board.h
+ create mode 100644 boards/st/nucleo-f767zi/nuttx-config/include/board_dma_map.h
+ create mode 100644 boards/st/nucleo-f767zi/nuttx-config/nsh/defconfig
+ create mode 100644 boards/st/nucleo-f767zi/nuttx-config/scripts/script.ld
+ create mode 100644 boards/st/nucleo-f767zi/src/CMakeLists.txt
+ create mode 100644 boards/st/nucleo-f767zi/src/board_config.h
+ create mode 100644 boards/st/nucleo-f767zi/src/init.c
+ create mode 100644 boards/st/nucleo-f767zi/src/led.c
+ create mode 100644 boards/st/nucleo-f767zi/src/spi.cpp
+ create mode 100644 boards/st/nucleo-f767zi/src/timer_config.cpp
+ create mode 100644 boards/st/nucleo-f767zi/src/usb.c
+
+diff --git a/boards/st/nucleo-f767zi/default.px4board b/boards/st/nucleo-f767zi/default.px4board
+new file mode 100644
+index 0000000000..7fd977ef11
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/default.px4board
+@@ -0,0 +1,56 @@
++CONFIG_BOARD_TOOLCHAIN="arm-none-eabi"
++CONFIG_BOARD_ARCHITECTURE="cortex-m7"
++CONFIG_BOARD_NO_SDCARD=y
++CONFIG_BOARD_SERIAL_TEL1="/dev/ttyS1"
++CONFIG_DRIVERS_BAROMETER_BMP388=y
++CONFIG_DRIVERS_CDCACM_AUTOSTART=y
++CONFIG_DRIVERS_IMU_BOSCH_BMI088=y
++CONFIG_DRIVERS_MAGNETOMETER_RM3100=y
++CONFIG_DRIVERS_PWM_OUT=y
++CONFIG_DRIVERS_UAVCAN=y
++CONFIG_BOARD_UAVCAN_INTERFACES=1
++CONFIG_MODULES_AIRSPEED_SELECTOR=y
++CONFIG_MODULES_COMMANDER=y
++CONFIG_MODULES_CONTROL_ALLOCATOR=y
++CONFIG_MODULES_DATAMAN=y
++CONFIG_MODULES_EKF2=y
++# EKF2_AUX_GLOBAL_POSITION stays ON (default): it is the fusion path an
++# external position source feeds (aux_global_position, SOURCE_VISION).
++# EKF2_DRAG_FUSION also stays ON: airspeed_fusion.cpp references
++# ekf2_drag_ctrl unconditionally, so turning it off does not build.
++# CONFIG_EKF2_AUXVEL is not set
++# CONFIG_EKF2_GNSS_YAW is not set
++# CONFIG_EKF2_OPTICAL_FLOW is not set
++# CONFIG_EKF2_RANGE_FINDER is not set
++CONFIG_MODULES_EVENTS=y
++CONFIG_MODULES_FW_ATT_CONTROL=y
++CONFIG_MODULES_FW_LATERAL_LONGITUDINAL_CONTROL=y
++CONFIG_MODULES_FW_MODE_MANAGER=y
++CONFIG_MODULES_FW_RATE_CONTROL=y
++CONFIG_MODULES_GYRO_CALIBRATION=y
++CONFIG_MODULES_LAND_DETECTOR=y
++CONFIG_MODULES_LOAD_MON=y
++CONFIG_MODULES_LOGGER=y
++CONFIG_MODULES_MAG_BIAS_ESTIMATOR=y
++CONFIG_MODULES_MANUAL_CONTROL=y
++CONFIG_MODULES_MAVLINK=y
++CONFIG_MODULES_NAVIGATOR=y
++CONFIG_MODULES_RC_UPDATE=y
++CONFIG_MODULES_SENSORS=y
++CONFIG_MODULES_UXRCE_DDS_CLIENT=y
++CONFIG_SYSTEMCMDS_ACTUATOR_TEST=y
++CONFIG_SYSTEMCMDS_BSONDUMP=y
++CONFIG_SYSTEMCMDS_DMESG=y
++CONFIG_SYSTEMCMDS_GPIO=y
++CONFIG_SYSTEMCMDS_HARDFAULT_LOG=y
++CONFIG_SYSTEMCMDS_LED_CONTROL=y
++CONFIG_SYSTEMCMDS_NSHTERM=y
++CONFIG_SYSTEMCMDS_PARAM=y
++CONFIG_SYSTEMCMDS_PERF=y
++CONFIG_SYSTEMCMDS_REBOOT=y
++CONFIG_SYSTEMCMDS_TOP=y
++CONFIG_SYSTEMCMDS_TOPIC_LISTENER=y
++CONFIG_SYSTEMCMDS_UORB=y
++CONFIG_SYSTEMCMDS_USB_CONNECTED=y
++CONFIG_SYSTEMCMDS_VER=y
++CONFIG_SYSTEMCMDS_WORK_QUEUE=y
+diff --git a/boards/st/nucleo-f767zi/firmware.prototype b/boards/st/nucleo-f767zi/firmware.prototype
+new file mode 100644
+index 0000000000..88a9fbee08
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/firmware.prototype
+@@ -0,0 +1,13 @@
++{
++    "board_id": 1498,
++    "magic": "st-nucleo-f767zi",
++    "description": "Firmware for the NUCLEO-F767ZI rotanimb01 HITL DUT",
++    "image": "",
++    "build_time": 0,
++    "summary": "st-nucleo-f767zi",
++    "version": "0.1",
++    "image_size": 0,
++    "image_maxsize": 1835008,
++    "git_identity": "",
++    "board_revision": 0
++}
+diff --git a/boards/st/nucleo-f767zi/init/rc.board_defaults b/boards/st/nucleo-f767zi/init/rc.board_defaults
+new file mode 100644
+index 0000000000..aa198b9105
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/init/rc.board_defaults
+@@ -0,0 +1,26 @@
++#!/bin/sh
++#
++# NUCLEO-F767ZI HITL DUT board defaults
++#------------------------------------------------------------------------------
++
++# The board this firmware runs on is a bare NUCLEO-F767ZI: no SD card, no FRAM,
++# no battery monitor, no RC receiver, no buzzer, no safety switch.
++
++# There is no persistent filesystem, so the mission/geofence store has to live
++# in RAM. Left at the default the dataman module tries /fs/microsd, fails, and
++# the navigator then retries its safe-point cache forever (which also drowns
++# the 57600-baud console).
++param set-default SYS_DM_BACKEND 1
++
++# No battery monitoring of any kind, so the system-power preflight check has
++# nothing to look at: open its circuit breaker (the magic value is the one
++# CBRK_SUPPLY_CHK documents).
++param set-default BAT1_SOURCE 1
++param set-default CBRK_SUPPLY_CHK 894281
++
++# There is no RC receiver: the bench flies missions and external-mode setpoints.
++param set-default COM_RC_IN_MODE 4
++
++# The bench aircraft. Airframe 2110 carries the Kitfox model constants, the
++# harness's PWM channel order and the DroneCAN sensor config.
++param set-default SYS_AUTOSTART 2110
+diff --git a/boards/st/nucleo-f767zi/init/rc.board_sensors b/boards/st/nucleo-f767zi/init/rc.board_sensors
+new file mode 100644
+index 0000000000..69eee9d892
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/init/rc.board_sensors
+@@ -0,0 +1,34 @@
++#!/bin/sh
++#
++# NUCLEO-F767ZI HITL DUT sensor init
++#
++# The whole "sensor suite" is one STM32G474 (the rotanimb01 harness) emulating
++# a BMI088 + BMP390 + RM3100 at the SPI register level on SPI3, chip selects
++# PD3/PD4/PD5/PD6. There is nothing else on the bus and no DRDY wiring.
++#
++#   -m 0  MANDATORY on every device. Real BMI088/BMP390/RM3100 silicon
++#         auto-detects the SPI clock phase per transaction; a register-level
++#         bus emulator cannot, so the whole bus is pinned to mode 0. This is
++#         the same choice the ArduPilot NucleoF767ZI hwdef makes (MODE0 on all
++#         four SPIDEVs) for the same reason.
++#   -f    bus frequency in kHz. The RM3100 is a 1 MHz part by datasheet, and
++#         the harness's no-dummy protocol (gyro, mag) is only reliable to
++#         ~1.3 MHz; the accel and baro owe a dummy byte and can burst faster.
++#   -R 8  ROTATION_ROLL_180 on the BMI088, and ONLY on the BMI088. PX4's driver
++#         treats the part's native frame as "+x forward, +y left, +z up" and
++#         negates y and z on every sample; ArduPilot's passes xyz straight
++#         through and lets the board rotation do all the work. The harness
++#         emits what ArduPilot's driver wants (it was written against it, and
++#         against a real sensor board's mounting), so PX4 needs one more
++#         180-degree roll to land back on those raw axes. Without it the
++#         accelerometer reads +9.81 m/s2 on Z at rest and EKF2 settles at
++#         roll 180 -- the aircraft is upside down as far as it is concerned.
++#         The RM3100 needs no such correction: both drivers agree on its
++#         axes, and the emulated field checks out in FRD (x=H*cos(psi),
++#         y=-H*sin(psi), z=+Z) against the model heading.
++#------------------------------------------------------------------------------
++
++bmi088 -A -s -b 3 -m 0 -f 4000 -R 8 start
++bmi088 -G -s -b 3 -m 0 -f 1000 -R 8 start
++bmp388 -s -b 3 -m 0 -f 4000 start
++rm3100 -s -b 3 -m 0 -f 1000 -R 0 start
+diff --git a/boards/st/nucleo-f767zi/nuttx-config/include/board.h b/boards/st/nucleo-f767zi/nuttx-config/include/board.h
+new file mode 100644
+index 0000000000..b0b0caa2f3
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/nuttx-config/include/board.h
+@@ -0,0 +1,227 @@
++/****************************************************************************
++ *
++ *   Copyright (C) 2026 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++#pragma once
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++#include "board_dma_map.h"
++
++#include <nuttx/config.h>
++
++#ifndef __ASSEMBLY__
++# include <stdint.h>
++#endif
++
++#include "stm32_rcc.h"
++
++/****************************************************************************
++ * Pre-processor Definitions
++ ****************************************************************************/
++
++/* Clocking *****************************************************************/
++
++/* The NUCLEO-F767ZI provides the following clock sources:
++ *
++ *   MCO: 8 MHz from the MCO output of the on-board ST-LINK (default solder
++ *        bridge configuration; X3, the HSE crystal, is NOT fitted).
++ *   X2:  32.768 kHz LSE crystal (fitted, unused here)
++ *
++ * The MCO is a clock SIGNAL, not a crystal, so HSE must run in BYPASS mode
++ * (STM32_HSEBYP_ENABLE below). This mirrors `define STM32_HSE_BYPASS` in the
++ * ArduPilot NucleoF767ZI hwdef the bench harness is wired against.
++ */
++
++#define STM32_BOARD_XTAL        8000000ul
++
++#define STM32_HSI_FREQUENCY     16000000ul
++#define STM32_LSI_FREQUENCY     32000
++#define STM32_HSE_FREQUENCY     STM32_BOARD_XTAL
++#define STM32_LSE_FREQUENCY     0
++
++/* HSE is driven by the ST-LINK MCO: external clock, bypass the oscillator */
++#define STM32_HSEBYP_ENABLE     1
++
++/* Main PLL Configuration.
++ *
++ * PLL source is HSE = 8,000,000
++ *
++ * PLL_VCO = (STM32_HSE_FREQUENCY / PLLM) * PLLN
++ * Subject to:
++ *
++ *     2 <= PLLM <= 63
++ *   192 <= PLLN <= 432
++ *   192 MHz <= PLL_VCO <= 432 MHz
++ *
++ * SYSCLK  = PLL_VCO / PLLP,  PLLP = {2, 4, 6, 8},  SYSCLK <= 216 MHz
++ * USB OTG FS / RNG clock = PLL_VCO / PLLQ, must be <= 48 MHz
++ *
++ * PLL_VCO = (8,000,000 / 4) * 216 = 432 MHz
++ * SYSCLK  = 432 MHz / 2 = 216 MHz
++ * OTG FS  = 432 MHz / 9 = 48 MHz
++ *
++ * Same factors as the NuttX nucleo-144 f767 board configuration.
++ */
++#define STM32_PLLCFG_PLLM       RCC_PLLCFG_PLLM(4)
++#define STM32_PLLCFG_PLLN       RCC_PLLCFG_PLLN(216)
++#define STM32_PLLCFG_PLLP       RCC_PLLCFG_PLLP_2
++#define STM32_PLLCFG_PLLQ       RCC_PLLCFG_PLLQ(9)
++
++#define STM32_VCO_FREQUENCY     ((STM32_HSE_FREQUENCY / 4) * 216)
++#define STM32_SYSCLK_FREQUENCY  (STM32_VCO_FREQUENCY / 2)
++#define STM32_OTGFS_FREQUENCY   (STM32_VCO_FREQUENCY / 9)
++
++/* Configure factors for  PLLSAI clock */
++#define CONFIG_STM32F7_PLLSAI 1
++#define STM32_RCC_PLLSAICFGR_PLLSAIN    RCC_PLLSAICFGR_PLLSAIN(192)
++#define STM32_RCC_PLLSAICFGR_PLLSAIP    RCC_PLLSAICFGR_PLLSAIP(8)
++#define STM32_RCC_PLLSAICFGR_PLLSAIQ    RCC_PLLSAICFGR_PLLSAIQ(4)
++#define STM32_RCC_PLLSAICFGR_PLLSAIR    RCC_PLLSAICFGR_PLLSAIR(2)
++
++/* Configure Dedicated Clock Configuration Register */
++#define STM32_RCC_DCKCFGR1_PLLI2SDIVQ  RCC_DCKCFGR1_PLLI2SDIVQ(1)
++#define STM32_RCC_DCKCFGR1_PLLSAIDIVQ  RCC_DCKCFGR1_PLLSAIDIVQ(1)
++#define STM32_RCC_DCKCFGR1_PLLSAIDIVR  RCC_DCKCFGR1_PLLSAIDIVR(0)
++#define STM32_RCC_DCKCFGR1_SAI1SRC     RCC_DCKCFGR1_SAI1SEL(0)
++#define STM32_RCC_DCKCFGR1_SAI2SRC     RCC_DCKCFGR1_SAI2SEL(0)
++#define STM32_RCC_DCKCFGR1_TIMPRESRC   0
++#define STM32_RCC_DCKCFGR1_DFSDM1SRC   0
++#define STM32_RCC_DCKCFGR1_ADFSDM1SRC  0
++
++/* Configure factors for  PLLI2S clock */
++#define CONFIG_STM32F7_PLLI2S 1
++#define STM32_RCC_PLLI2SCFGR_PLLI2SN   RCC_PLLI2SCFGR_PLLI2SN(192)
++#define STM32_RCC_PLLI2SCFGR_PLLI2SP   RCC_PLLI2SCFGR_PLLI2SP(2)
++#define STM32_RCC_PLLI2SCFGR_PLLI2SQ   RCC_PLLI2SCFGR_PLLI2SQ(2)
++#define STM32_RCC_PLLI2SCFGR_PLLI2SR   RCC_PLLI2SCFGR_PLLI2SR(2)
++
++/* Configure Dedicated Clock Configuration Register 2 */
++#define STM32_RCC_DCKCFGR2_USART1SRC  RCC_DCKCFGR2_USART1SEL_APB
++#define STM32_RCC_DCKCFGR2_USART2SRC  RCC_DCKCFGR2_USART2SEL_APB
++#define STM32_RCC_DCKCFGR2_UART4SRC   RCC_DCKCFGR2_UART4SEL_APB
++#define STM32_RCC_DCKCFGR2_UART5SRC   RCC_DCKCFGR2_UART5SEL_APB
++#define STM32_RCC_DCKCFGR2_USART6SRC  RCC_DCKCFGR2_USART6SEL_APB
++#define STM32_RCC_DCKCFGR2_UART7SRC   RCC_DCKCFGR2_UART7SEL_APB
++#define STM32_RCC_DCKCFGR2_UART8SRC   RCC_DCKCFGR2_UART8SEL_APB
++#define STM32_RCC_DCKCFGR2_I2C1SRC    RCC_DCKCFGR2_I2C1SEL_HSI
++#define STM32_RCC_DCKCFGR2_I2C2SRC    RCC_DCKCFGR2_I2C2SEL_HSI
++#define STM32_RCC_DCKCFGR2_I2C3SRC    RCC_DCKCFGR2_I2C3SEL_HSI
++#define STM32_RCC_DCKCFGR2_I2C4SRC    RCC_DCKCFGR2_I2C4SEL_HSI
++#define STM32_RCC_DCKCFGR2_LPTIM1SRC  RCC_DCKCFGR2_LPTIM1SEL_APB
++#define STM32_RCC_DCKCFGR2_CECSRC     RCC_DCKCFGR2_CECSEL_HSI
++#define STM32_RCC_DCKCFGR2_CK48MSRC   RCC_DCKCFGR2_CK48MSEL_PLL
++#define STM32_RCC_DCKCFGR2_SDMMCSRC   RCC_DCKCFGR2_SDMMCSEL_48MHZ
++#define STM32_RCC_DCKCFGR2_SDMMC2SRC  RCC_DCKCFGR2_SDMMC2SEL_48MHZ
++#define STM32_RCC_DCKCFGR2_DSISRC     RCC_DCKCFGR2_DSISEL_PHY
++
++/* Several prescalers allow the configuration of the two AHB buses, the
++ * high-speed APB (APB2) and the low-speed APB (APB1) domains. The maximum
++ * frequency of the two AHB buses is 216 MHz while the maximum frequency of
++ * the high-speed APB domains is 108 MHz. The maximum allowed frequency of
++ * the low-speed APB domain is 54 MHz.
++ */
++
++/* AHB clock (HCLK) is SYSCLK (216 MHz) */
++#define STM32_RCC_CFGR_HPRE     RCC_CFGR_HPRE_SYSCLK  /* HCLK  = SYSCLK / 1 */
++#define STM32_HCLK_FREQUENCY    STM32_SYSCLK_FREQUENCY
++#define STM32_BOARD_HCLK        STM32_HCLK_FREQUENCY  /* same as above, to satisfy compiler */
++
++/* APB1 clock (PCLK1) is HCLK/4 (54 MHz) */
++#define STM32_RCC_CFGR_PPRE1    RCC_CFGR_PPRE1_HCLKd4     /* PCLK1 = HCLK / 4 */
++#define STM32_PCLK1_FREQUENCY   (STM32_HCLK_FREQUENCY/4)
++
++/* Timers driven from APB1 will be twice PCLK1 (108 MHz) */
++#define STM32_APB1_TIM2_CLKIN   (2*STM32_PCLK1_FREQUENCY)
++#define STM32_APB1_TIM3_CLKIN   (2*STM32_PCLK1_FREQUENCY)
++#define STM32_APB1_TIM4_CLKIN   (2*STM32_PCLK1_FREQUENCY)
++#define STM32_APB1_TIM5_CLKIN   (2*STM32_PCLK1_FREQUENCY)
++#define STM32_APB1_TIM6_CLKIN   (2*STM32_PCLK1_FREQUENCY)
++#define STM32_APB1_TIM7_CLKIN   (2*STM32_PCLK1_FREQUENCY)
++#define STM32_APB1_TIM12_CLKIN  (2*STM32_PCLK1_FREQUENCY)
++#define STM32_APB1_TIM13_CLKIN  (2*STM32_PCLK1_FREQUENCY)
++#define STM32_APB1_TIM14_CLKIN  (2*STM32_PCLK1_FREQUENCY)
++
++/* APB2 clock (PCLK2) is HCLK/2 (108 MHz) */
++#define STM32_RCC_CFGR_PPRE2    RCC_CFGR_PPRE2_HCLKd2     /* PCLK2 = HCLK / 2 */
++#define STM32_PCLK2_FREQUENCY   (STM32_HCLK_FREQUENCY/2)
++
++/* Timers driven from APB2 will be twice PCLK2 (216 MHz) */
++#define STM32_APB2_TIM1_CLKIN   (2*STM32_PCLK2_FREQUENCY)
++#define STM32_APB2_TIM8_CLKIN   (2*STM32_PCLK2_FREQUENCY)
++#define STM32_APB2_TIM9_CLKIN   (2*STM32_PCLK2_FREQUENCY)
++#define STM32_APB2_TIM10_CLKIN  (2*STM32_PCLK2_FREQUENCY)
++#define STM32_APB2_TIM11_CLKIN  (2*STM32_PCLK2_FREQUENCY)
++
++/* FLASH wait states
++ *
++ *  --------- ---------- -----------
++ *  VDD       MAX SYSCLK WAIT STATES
++ *  --------- ---------- -----------
++ *  1.7-2.1 V   180 MHz    8
++ *  2.1-2.4 V   216 MHz    9
++ *  2.4-2.7 V   216 MHz    8
++ *  2.7-3.6 V   216 MHz    7
++ *  --------- ---------- -----------
++ */
++
++#define BOARD_FLASH_WAITSTATES 7
++
++/* Alternate function pin selections ****************************************/
++
++/* USART3 PD8/PD9 = the ST-LINK virtual COM port: the NSH/system console.
++ * (On this Nucleo the ST-LINK VCP is hard-wired to USART3, not USART2.)
++ */
++#define GPIO_USART3_RX   GPIO_USART3_RX_3   /* PD9 */
++#define GPIO_USART3_TX   GPIO_USART3_TX_3   /* PD8 */
++
++/* USART6 PG14/PG9 = Arduino D1/D0 on ZIO CN10: a spare telemetry link.
++ * Clear of the RMII PHY (PA1/PA2/PA7, PC1/PC4/PC5, PB13, PG11/PG13), of
++ * SPI3 and its port-D chip selects, of the TIM3/TIM4 PWM banks and of CAN1.
++ */
++#define GPIO_USART6_RX   GPIO_USART6_RX_2   /* PG9  */
++#define GPIO_USART6_TX   GPIO_USART6_TX_2   /* PG14 */
++
++/* CAN1 PD0/PD1 (ZIO CN9) -> TJA1051 transceiver -> harness FDCAN3.
++ * DroneCAN GPS + airspeed from the rotanimb01 feeder.
++ */
++#define GPIO_CAN1_RX     GPIO_CAN1_RX_3     /* PD0 */
++#define GPIO_CAN1_TX     GPIO_CAN1_TX_3     /* PD1 */
++
++/* SPI3 = the emulated sensor bus (BMI088 accel+gyro, BMP390, RM3100).
++ * SPI1 is unusable on this board: the ethernet PHY owns PA1/PA2/PA7.
++ * Note PB3/PB4 are JTDO/NJTRST — fine under 2-wire SWD, but SWO is lost.
++ */
++#define GPIO_SPI3_SCK    GPIO_SPI3_SCK_1    /* PB3 */
++#define GPIO_SPI3_MISO   GPIO_SPI3_MISO_1   /* PB4 */
++#define GPIO_SPI3_MOSI   GPIO_SPI3_MOSI_2   /* PB5 */
+diff --git a/boards/st/nucleo-f767zi/nuttx-config/include/board_dma_map.h b/boards/st/nucleo-f767zi/nuttx-config/include/board_dma_map.h
+new file mode 100644
+index 0000000000..cb167e495a
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/nuttx-config/include/board_dma_map.h
+@@ -0,0 +1,66 @@
++/****************************************************************************
++ *
++ *   Copyright (c) 2020 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++#pragma once
++
++/* DMA stream/channel allocation for the NUCLEO-F767ZI HITL DUT.
++ *
++ * Only four peripherals need DMA here: the emulated sensor bus (SPI3), the
++ * ST-LINK VCP console (USART3) and the spare link (USART6). The PWM banks
++ * (TIM3/TIM4) are driven by PX4's io_timer without DMA, and there is no SDMMC.
++ *
++ *   DMA1 Stream 0 Ch 0   SPI3_RX_1
++ *   DMA1 Stream 1 Ch 4   USART3_RX     (no alternative mapping)
++ *   DMA1 Stream 3 Ch 4   USART3_TX_1
++ *   DMA1 Stream 5 Ch 0   SPI3_TX_1
++ *   DMA2 Stream 1 Ch 5   USART6_RX_1
++ *   DMA2 Stream 6 Ch 5   USART6_TX_1
++ */
++
++// DMA1 Channel/Stream Selections
++//--------------------------------------------//---------------------------//----------------
++#define DMAMAP_SPI3_RX    DMAMAP_SPI3_RX_1    // DMA1, Stream 0, Channel 0    (sensor bus RX)
++//      DMAMAP_USART3_RX                      // DMA1, Stream 1, Channel 4    (console RX)
++//      AVAILABLE                             // DMA1, Stream 2
++#define DMAMAP_USART3_TX  DMAMAP_USART3_TX_1  // DMA1, Stream 3, Channel 4    (console TX)
++//      AVAILABLE                             // DMA1, Stream 4
++#define DMAMAP_SPI3_TX    DMAMAP_SPI3_TX_1    // DMA1, Stream 5, Channel 0    (sensor bus TX)
++//      AVAILABLE                             // DMA1, Stream 6
++//      AVAILABLE                             // DMA1, Stream 7
++
++//  DMA2 Channel/Stream Selections
++//--------------------------------------------//---------------------------//----------------
++//      AVAILABLE                             // DMA2, Stream 0
++#define DMAMAP_USART6_RX  DMAMAP_USART6_RX_1  // DMA2, Stream 1, Channel 5    (spare link RX) 
++//      AVAILABLE                             // DMA2, Streams 2..5
++#define DMAMAP_USART6_TX  DMAMAP_USART6_TX_1  // DMA2, Stream 6, Channel 5    (spare link TX) 
++//      AVAILABLE                             // DMA2, Stream 7
+diff --git a/boards/st/nucleo-f767zi/nuttx-config/nsh/defconfig b/boards/st/nucleo-f767zi/nuttx-config/nsh/defconfig
+new file mode 100644
+index 0000000000..c145b7c9ea
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/nuttx-config/nsh/defconfig
+@@ -0,0 +1,203 @@
++#
++# This file is autogenerated: PLEASE DO NOT EDIT IT.
++#
++# You can use "make menuconfig" to make any modifications to the installed .config file.
++# You can then do "make savedefconfig" to generate a new defconfig file that includes your
++# modifications.
++#
++# CONFIG_DISABLE_ENVIRON is not set
++# CONFIG_DISABLE_PSEUDOFS_OPERATIONS is not set
++# CONFIG_DISABLE_PTHREAD is not set
++# CONFIG_FS_PROCFS_EXCLUDE_ENVIRON is not set
++# CONFIG_MMCSD_HAVE_CARDDETECT is not set
++# CONFIG_MMCSD_HAVE_WRITEPROTECT is not set
++# CONFIG_MMCSD_MMCSUPPORT is not set
++# CONFIG_MMCSD_SPI is not set
++# CONFIG_NSH_DISABLEBG is not set
++# CONFIG_NSH_DISABLESCRIPT is not set
++# CONFIG_NSH_DISABLE_CAT is not set
++# CONFIG_NSH_DISABLE_CD is not set
++# CONFIG_NSH_DISABLE_CP is not set
++# CONFIG_NSH_DISABLE_DATE is not set
++# CONFIG_NSH_DISABLE_DF is not set
++# CONFIG_NSH_DISABLE_ECHO is not set
++# CONFIG_NSH_DISABLE_ENV is not set
++# CONFIG_NSH_DISABLE_EXEC is not set
++# CONFIG_NSH_DISABLE_EXIT is not set
++# CONFIG_NSH_DISABLE_EXPORT is not set
++# CONFIG_NSH_DISABLE_FREE is not set
++# CONFIG_NSH_DISABLE_GET is not set
++# CONFIG_NSH_DISABLE_HELP is not set
++# CONFIG_NSH_DISABLE_ITEF is not set
++# CONFIG_NSH_DISABLE_KILL is not set
++# CONFIG_NSH_DISABLE_LOOPS is not set
++# CONFIG_NSH_DISABLE_LS is not set
++# CONFIG_NSH_DISABLE_MKDIR is not set
++# CONFIG_NSH_DISABLE_MKFATFS is not set
++# CONFIG_NSH_DISABLE_MOUNT is not set
++# CONFIG_NSH_DISABLE_MV is not set
++# CONFIG_NSH_DISABLE_PS is not set
++# CONFIG_NSH_DISABLE_PSSTACKUSAGE is not set
++# CONFIG_NSH_DISABLE_PWD is not set
++# CONFIG_NSH_DISABLE_RM is not set
++# CONFIG_NSH_DISABLE_RMDIR is not set
++# CONFIG_NSH_DISABLE_SEMICOLON is not set
++# CONFIG_NSH_DISABLE_SET is not set
++# CONFIG_NSH_DISABLE_SLEEP is not set
++# CONFIG_NSH_DISABLE_SOURCE is not set
++# CONFIG_NSH_DISABLE_TEST is not set
++# CONFIG_NSH_DISABLE_TIME is not set
++# CONFIG_NSH_DISABLE_UMOUNT is not set
++# CONFIG_NSH_DISABLE_UNSET is not set
++# CONFIG_NSH_DISABLE_USLEEP is not set
++CONFIG_ARCH="arm"
++CONFIG_ARCH_BOARD_CUSTOM=y
++CONFIG_ARCH_BOARD_CUSTOM_DIR="../../../../boards/st/nucleo-f767zi/nuttx-config"
++CONFIG_ARCH_BOARD_CUSTOM_DIR_RELPATH=y
++CONFIG_ARCH_BOARD_CUSTOM_NAME="px4"
++CONFIG_ARCH_CHIP="stm32f7"
++CONFIG_ARCH_CHIP_STM32F767ZI=y
++CONFIG_ARCH_CHIP_STM32F7=y
++CONFIG_ARCH_INTERRUPTSTACK=768
++CONFIG_ARCH_STACKDUMP=y
++CONFIG_ARMV7M_BASEPRI_WAR=y
++CONFIG_ARMV7M_DCACHE=y
++CONFIG_ARMV7M_DTCM=y
++CONFIG_ARMV7M_ICACHE=y
++CONFIG_ARMV7M_MEMCPY=y
++CONFIG_ARMV7M_USEBASEPRI=y
++CONFIG_ARM_MPU_EARLY_RESET=y
++CONFIG_BOARDCTL_RESET=y
++CONFIG_BOARD_ASSERT_RESET_VALUE=0
++CONFIG_BOARD_CRASHDUMP=y
++CONFIG_BOARD_LOOPSPERMSEC=22114
++CONFIG_BOARD_RESET_ON_ASSERT=2
++CONFIG_BUILTIN=y
++CONFIG_CDCACM=y
++CONFIG_CDCACM_PRODUCTID=0x0011
++CONFIG_CDCACM_PRODUCTSTR="PX4 Nucleo-F767ZI HITL"
++CONFIG_CDCACM_VENDORID=0x1209
++CONFIG_CDCACM_VENDORSTR="PX4"
++CONFIG_CDCACM_IFLOWCONTROL=y
++CONFIG_CDCACM_RXBUFSIZE=600
++CONFIG_CDCACM_TXBUFSIZE=12000
++CONFIG_DEBUG_FULLOPT=y
++CONFIG_DEBUG_HARDFAULT_ALERT=y
++CONFIG_DEBUG_SYMBOLS=y
++CONFIG_DEBUG_TCBINFO=y
++CONFIG_DEFAULT_SMALL=y
++CONFIG_DEV_FIFO_SIZE=0
++CONFIG_DEV_PIPE_MAXSIZE=1024
++CONFIG_DEV_PIPE_SIZE=70
++CONFIG_FDCLONE_STDIO=y
++CONFIG_FS_BINFS=y
++CONFIG_FS_CROMFS=y
++CONFIG_FS_LARGEFILE=y
++CONFIG_FS_PROCFS=y
++CONFIG_FS_PROCFS_INCLUDE_PROGMEM=y
++CONFIG_FS_PROCFS_MAX_TASKS=64
++CONFIG_FS_PROCFS_REGISTER=y
++CONFIG_FS_ROMFS=y
++CONFIG_GRAN=y
++CONFIG_GRAN_INTR=y
++CONFIG_HAVE_CXX=y
++CONFIG_HAVE_CXXINITIALIZE=y
++CONFIG_IDLETHREAD_STACKSIZE=750
++CONFIG_INIT_ENTRYPOINT="nsh_main"
++CONFIG_INIT_STACKSIZE=3194
++CONFIG_LIBC_FLOATINGPOINT=y
++CONFIG_LIBC_LONG_LONG=y
++CONFIG_LIBC_MAX_EXITFUNS=1
++CONFIG_LIBC_STRERROR=y
++CONFIG_MEMSET_64BIT=y
++CONFIG_MEMSET_OPTSPEED=y
++CONFIG_MM_REGIONS=3
++CONFIG_NAME_MAX=40
++CONFIG_NSH_ARCHINIT=y
++CONFIG_NSH_ARGCAT=y
++CONFIG_NSH_BUILTIN_APPS=y
++CONFIG_NSH_CMDPARMS=y
++CONFIG_NSH_CROMFSETC=y
++CONFIG_NSH_LINELEN=128
++CONFIG_NSH_MAXARGUMENTS=15
++CONFIG_NSH_NESTDEPTH=8
++CONFIG_NSH_QUOTE=y
++CONFIG_NSH_ROMFSETC=y
++CONFIG_NSH_ROMFSSECTSIZE=128
++CONFIG_NSH_STRERROR=y
++CONFIG_NSH_VARS=y
++CONFIG_OTG_ID_GPIO_DISABLE=y
++CONFIG_PIPES=y
++CONFIG_PREALLOC_TIMERS=50
++CONFIG_PRIORITY_INHERITANCE=y
++CONFIG_PTHREAD_MUTEX_ROBUST=y
++CONFIG_PTHREAD_MUTEX_TYPES=y
++CONFIG_PTHREAD_STACK_MIN=512
++CONFIG_RAM_SIZE=245760
++CONFIG_RAM_START=0x20010000
++CONFIG_RAW_BINARY=y
++CONFIG_READLINE_CMD_HISTORY=y
++CONFIG_READLINE_TABCOMPLETION=y
++CONFIG_SCHED_HPWORK=y
++CONFIG_SCHED_HPWORKPRIORITY=249
++CONFIG_SCHED_HPWORKSTACKSIZE=1280
++CONFIG_SCHED_INSTRUMENTATION=y
++CONFIG_SCHED_INSTRUMENTATION_EXTERNAL=y
++CONFIG_SCHED_INSTRUMENTATION_SWITCH=y
++CONFIG_SCHED_LPWORK=y
++CONFIG_SCHED_LPWORKPRIORITY=50
++CONFIG_SCHED_LPWORKSTACKSIZE=1632
++CONFIG_SCHED_WAITPID=y
++CONFIG_SEM_PREALLOCHOLDERS=32
++CONFIG_SERIAL_IFLOWCONTROL_WATERMARKS=y
++CONFIG_SERIAL_TERMIOS=y
++CONFIG_SIG_DEFAULT=y
++CONFIG_SIG_SIGALRM_ACTION=y
++CONFIG_SIG_SIGUSR1_ACTION=y
++CONFIG_SIG_SIGUSR2_ACTION=y
++CONFIG_SIG_SIGWORK=4
++CONFIG_STACK_COLORATION=y
++CONFIG_START_DAY=30
++CONFIG_START_MONTH=11
++CONFIG_STDIO_BUFFER_SIZE=256
++CONFIG_STM32F7_BBSRAM=y
++CONFIG_STM32F7_BBSRAM_FILES=5
++CONFIG_STM32F7_BKPSRAM=y
++CONFIG_STM32F7_DMA1=y
++CONFIG_STM32F7_DMA2=y
++CONFIG_STM32F7_DMACAPABLE=y
++CONFIG_STM32F7_FLOWCONTROL_BROKEN=y
++CONFIG_STM32F7_OTGFS=y
++CONFIG_STM32F7_PROGMEM=y
++CONFIG_STM32F7_PWR=y
++CONFIG_STM32F7_SAVE_CRASHDUMP=y
++CONFIG_STM32F7_SERIALBRK_BSDCOMPAT=y
++CONFIG_STM32F7_SERIAL_DISABLE_REORDERING=y
++CONFIG_STM32F7_SPI3=y
++CONFIG_STM32F7_SPI3_DMA=y
++CONFIG_STM32F7_SPI3_DMA_BUFFER=1024
++CONFIG_STM32F7_SPI_DMATHRESHOLD=8
++CONFIG_STM32F7_TIM5=y
++CONFIG_STM32F7_USART3=y
++CONFIG_STM32F7_USART6=y
++CONFIG_STM32F7_USART_BREAKS=y
++CONFIG_STM32F7_USART_INVERT=y
++CONFIG_STM32F7_USART_SINGLEWIRE=y
++CONFIG_STM32F7_USART_SWAP=y
++CONFIG_STM32F7_WWDG=y
++CONFIG_SYSTEM_CDCACM=y
++CONFIG_SYSTEM_NSH=y
++CONFIG_TASK_NAME_SIZE=24
++CONFIG_USART3_BAUD=57600
++CONFIG_USART3_RXBUFSIZE=600
++CONFIG_USART3_RXDMA=y
++CONFIG_USART3_SERIAL_CONSOLE=y
++CONFIG_USART3_TXBUFSIZE=3000
++CONFIG_USART6_BAUD=57600
++CONFIG_USART6_RXBUFSIZE=600
++CONFIG_USART6_RXDMA=y
++CONFIG_USART6_TXBUFSIZE=1500
++CONFIG_USBDEV=y
++CONFIG_USBDEV_BUSPOWERED=y
++CONFIG_USBDEV_MAXPOWER=500
++CONFIG_USEC_PER_TICK=1000
+diff --git a/boards/st/nucleo-f767zi/nuttx-config/scripts/script.ld b/boards/st/nucleo-f767zi/nuttx-config/scripts/script.ld
+new file mode 100644
+index 0000000000..7d5fa245c9
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/nuttx-config/scripts/script.ld
+@@ -0,0 +1,180 @@
++/****************************************************************************
++ * scripts/script.ld
++ *
++ *   Copyright (C) 2019-2020 Gregory Nutt. All rights reserved.
++ *   Author: Gregory Nutt <gnutt@nuttx.org>
++ *
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name NuttX nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++/* The STM32F765IIT6 has 2048 KiB of main FLASH memory.  This FLASH memory
++ * can be accessed from either the AXIM interface at address 0x0800:0000 or
++ * from the ITCM interface at address 0x0020:0000.
++ *
++ * Additional information, including the option bytes, is available at at
++ * FLASH at address 0x1ff0:0000 (AXIM) or 0x0010:0000 (ITCM).
++ *
++ * In the STM32F765IIT6, two different boot spaces can be selected through
++ * the BOOT pin and the boot base address programmed in the BOOT_ADD0 and
++ * BOOT_ADD1 option bytes:
++ *
++ *   1) BOOT=0: Boot address defined by user option byte BOOT_ADD0[15:0].
++ *      ST programmed value: Flash on ITCM at 0x0020:0000
++ *   2) BOOT=1: Boot address defined by user option byte BOOT_ADD1[15:0].
++ *      ST programmed value: System bootloader at 0x0010:0000
++ *
++ * NuttX does not modify these option byes.  On the unmodified NUCLEO-144
++ * board, the BOOT0 pin is at ground so by default, the STM32F765IIT6 will
++ * boot from address 0x0020:0000 in ITCM FLASH.
++ *
++ * The STM32F765IIT6 also has 512 KiB of data SRAM (in addition to ITCM SRAM).
++ * SRAM is split up into three blocks:
++ *
++ *   1) 128 KiB of DTCM SRM beginning at address 0x2000:0000
++ *   2) 368 KiB of SRAM1 beginning at address 0x2002:0000
++ *   3)  16 KiB of SRAM2 beginning at address 0x2007:c000
++ *
++ * When booting from FLASH, FLASH memory is aliased to address 0x0000:0000
++ * where the code expects to begin execution by jumping to the entry point in
++ * the 0x0800:0000 address range.
++ *
++ * There is NO PX4 bootloader on this board: the image is flashed straight to
++ * 0x0800:0000 over SWD with the Nucleo's on-board ST-LINK, so the vector table
++ * sits at the reset vector and the whole bank is ours -- except the last
++ * sector.
++ *
++ * F767ZI flash sectors (single 2 MB bank): 0-3 are 32 KB, 4 is 128 KB, 5-11
++ * are 256 KB. Sector 11 (256 KB at 0x081C:0000) is reserved for the parameter
++ * flashfs (see FLASH_BASED_PARAMS in src/board_config.h and the sector map in
++ * src/init.c), so the image gets sectors 0-10 = 1792 KB.
++ */
++
++MEMORY
++{
++	FLASH_ITCM (rx) : ORIGIN = 0x00200000, LENGTH = 1792K
++	FLASH_AXIM (rx) : ORIGIN = 0x08000000, LENGTH = 1792K /* sectors 0-10; sector 11 holds the parameters */
++
++	ITCM_RAM (rwx) : ORIGIN = 0x00000000, LENGTH = 16K
++	DTCM_RAM (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
++	SRAM1    (rwx) : ORIGIN = 0x20020000, LENGTH = 368K
++	SRAM2    (rwx) : ORIGIN = 0x2007c000, LENGTH = 16K
++}
++
++OUTPUT_ARCH(arm)
++EXTERN(_vectors)
++ENTRY(_stext)
++
++/*
++ * Ensure that abort() is present in the final object.  The exception handling
++ * code pulled in by libgcc.a requires it (and that code cannot be easily avoided).
++ */
++EXTERN(abort)
++SECTIONS
++{
++	.text : {
++		_stext = ABSOLUTE(.);
++		*(.vectors)
++		. = ALIGN(32);
++		*(.text .text.*)
++		*(.fixup)
++		*(.gnu.warning)
++		*(.rodata .rodata.*)
++		*(.gnu.linkonce.t.*)
++		*(.glue_7)
++		*(.glue_7t)
++		*(.got)
++		*(.gcc_except_table)
++		*(.gnu.linkonce.r.*)
++		_etext = ABSOLUTE(.);
++
++	} > FLASH_AXIM
++
++	/*
++	 * Init functions (static constructors and the like)
++	 */
++	.init_section : {
++		_sinit = ABSOLUTE(.);
++		KEEP(*(.init_array .init_array.*))
++		_einit = ABSOLUTE(.);
++	} > FLASH_AXIM
++
++
++	.ARM.extab : {
++		*(.ARM.extab*)
++	} > FLASH_AXIM
++
++	__exidx_start = ABSOLUTE(.);
++	.ARM.exidx : {
++		*(.ARM.exidx*)
++	} > FLASH_AXIM
++	__exidx_end = ABSOLUTE(.);
++
++	_eronly = ABSOLUTE(.);
++
++	.data : {
++		_sdata = ABSOLUTE(.);
++		*(.data .data.*)
++		*(.gnu.linkonce.d.*)
++		CONSTRUCTORS
++		_edata = ABSOLUTE(.);
++	} > SRAM1 AT > FLASH_AXIM
++
++	.bss : {
++		_sbss = ABSOLUTE(.);
++		*(.bss .bss.*)
++		*(.gnu.linkonce.b.*)
++		*(COMMON)
++		. = ALIGN(4);
++		_ebss = ABSOLUTE(.);
++	} > SRAM1
++
++	/* Stabs debugging sections. */
++	.stab 0 : { *(.stab) }
++	.stabstr 0 : { *(.stabstr) }
++	.stab.excl 0 : { *(.stab.excl) }
++	.stab.exclstr 0 : { *(.stab.exclstr) }
++	.stab.index 0 : { *(.stab.index) }
++	.stab.indexstr 0 : { *(.stab.indexstr) }
++	.comment 0 : { *(.comment) }
++	.debug_abbrev 0 : { *(.debug_abbrev) }
++	.debug_info 0 : { *(.debug_info) }
++	.debug_line 0 : { *(.debug_line) }
++	.debug_pubnames 0 : { *(.debug_pubnames) }
++	.debug_aranges 0 : { *(.debug_aranges) }
++
++	.ramfunc : {
++		_sramfuncs = .;
++		*(.ramfunc  .ramfunc.*)
++		. = ALIGN(4);
++		_eramfuncs = .;
++	} > ITCM_RAM AT > FLASH_AXIM
++
++	_framfuncs = LOADADDR(.ramfunc);
++}
+diff --git a/boards/st/nucleo-f767zi/src/CMakeLists.txt b/boards/st/nucleo-f767zi/src/CMakeLists.txt
+new file mode 100644
+index 0000000000..97db7fa069
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/src/CMakeLists.txt
+@@ -0,0 +1,50 @@
++############################################################################
++#
++#   Copyright (c) 2019 PX4 Development Team. All rights reserved.
++#
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions
++# are met:
++#
++# 1. Redistributions of source code must retain the above copyright
++#    notice, this list of conditions and the following disclaimer.
++# 2. Redistributions in binary form must reproduce the above copyright
++#    notice, this list of conditions and the following disclaimer in
++#    the documentation and/or other materials provided with the
++#    distribution.
++# 3. Neither the name PX4 nor the names of its contributors may be
++#    used to endorse or promote products derived from this software
++#    without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++# OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++# AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++# POSSIBILITY OF SUCH DAMAGE.
++#
++############################################################################
++
++add_library(drivers_board
++	init.c
++	led.c
++	spi.cpp
++	timer_config.cpp
++	usb.c
++)
++
++target_link_libraries(drivers_board
++	PRIVATE
++		arch_io_pins
++		arch_spi
++		drivers__led # drv_led_start
++		nuttx_arch
++		nuttx_drivers
++		px4_layer
++)
+diff --git a/boards/st/nucleo-f767zi/src/board_config.h b/boards/st/nucleo-f767zi/src/board_config.h
+new file mode 100644
+index 0000000000..0e36a66da8
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/src/board_config.h
+@@ -0,0 +1,186 @@
++/****************************************************************************
++ *
++ *   Copyright (c) 2026 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++/**
++ * @file board_config.h
++ *
++ * st_nucleo-f767zi internal definitions.
++ *
++ * A stock NUCLEO-F767ZI used as the DUT of the rotanimb01 hardware-in-the-loop
++ * bench: the whole "sensor suite" is one STM32G474 (the harness) impersonating
++ * a BMI088 + BMP390 + RM3100 at the SPI register level, feeding DroneCAN GPS
++ * and airspeed over CAN1 and capturing the eight servo PWM outputs.
++ *
++ * The pinout is fixed by that wiring and is identical, pin for pin, to the
++ * ArduPilot `NucleoF767ZI` hwdef the same harness already flies -- the two
++ * stacks swap on the same physical rig.
++ */
++
++#pragma once
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include <px4_platform_common/px4_config.h>
++#include <nuttx/compiler.h>
++#include <stdint.h>
++
++#include <stm32_gpio.h>
++
++/****************************************************************************
++ * Definitions
++ ****************************************************************************/
++
++/* LEDs *********************************************************************/
++/* The Nucleo's three user LEDs, driven push-pull against ground (active high):
++ *   LD1 green PB0, LD2 blue PB7, LD3 red PB14.
++ */
++
++/* NOTE the sense: unlike most PX4 boards these are ACTIVE HIGH, and src/led.c
++ * drives them accordingly. The GPIO_nLED_* names are kept because that is what
++ * the shared led.c backend expects to find.
++ */
++#define GPIO_nLED_GREEN	/* PB0  */	(GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTB|GPIO_PIN0)
++#define GPIO_nLED_BLUE	/* PB7  */	(GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTB|GPIO_PIN7)
++#define GPIO_nLED_RED	/* PB14 */	(GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_2MHz|GPIO_OUTPUT_CLEAR|GPIO_PORTB|GPIO_PIN14)
++
++#define BOARD_HAS_CONTROL_STATUS_LEDS       1
++#define BOARD_OVERLOAD_LED                  LED_RED
++#define BOARD_ARMED_STATE_LED               LED_BLUE
++
++/* ADC / power **************************************************************/
++/* There is no power monitoring of any kind on this bench board: no battery
++ * sense, no 5 V rail sense, no RSSI. The ADC driver is not built, and zero
++ * "bricks" keeps board_common.h from asking for ADC channel numbers that do
++ * not exist. battery_status is still built because the DroneCAN battery
++ * bridge in the uavcan driver links against it unconditionally.
++ */
++#define BOARD_NUMBER_BRICKS                 0
++
++/* PWM **********************************************************************/
++/* Eight outputs, TIM3 CH1-4 on PC6/7/8/9 and TIM4 CH1-4 on PD12/13/14/15,
++ * wired to the harness's capture inputs. See src/timer_config.cpp.
++ */
++#define DIRECT_PWM_OUTPUT_CHANNELS          8
++#define BOARD_NUM_IO_TIMERS                 2
++
++/* High-resolution timer ****************************************************/
++/* TIM5 is free: TIM3 and TIM4 are the PWM banks, and nothing else on this
++ * board needs a timer. 32-bit, on APB1 (108 MHz timer clock).
++ */
++#define HRT_TIMER                           5
++#define HRT_TIMER_CHANNEL                   1
++
++/* There is no PPM input on this board (RC comes from nowhere -- the bench
++ * flies autonomously), so no HRT_PPM_CHANNEL.
++ */
++
++/* USB OTG FS ***************************************************************/
++/* PA11 DM / PA12 DP on the user USB connector CN13.
++ *
++ * VBUS sensing is deliberately defeated. PA9 is the F767ZI's OTG_FS_VBUS pin
++ * and CN13's VBUS reaches it only through a solder bridge whose state we do
++ * not want to depend on -- so the pin is configured as an input WITH A
++ * PULL-UP, which reads high whether or not the bridge is fitted. board_ctrl.c
++ * inverts that into "USB present", which is what cdcacm_autostart needs before
++ * it will register /dev/ttyACM0. On a bench DUT that is permanently cabled to
++ * the host this is the truth anyway; the same trick is used by corvon/743v2.
++ */
++#define GPIO_OTGFS_VBUS   /* PA9 */ (GPIO_INPUT|GPIO_PULLUP|GPIO_SPEED_100MHz|GPIO_PORTA|GPIO_PIN9)
++#define BOARD_USB_VBUS_SENSE_DISABLED       1
++
++#define BOARD_ADC_USB_CONNECTED             (px4_arch_gpioread(GPIO_OTGFS_VBUS))
++#define BOARD_ADC_USB_VALID                 BOARD_ADC_USB_CONNECTED
++#define BOARD_ADC_SERVO_VALID               (1)
++
++/* Serial *******************************************************************/
++/* /dev/ttyS0 = USART3, the ST-LINK VCP -- the NSH console and debug link.
++ * /dev/ttyS1 = USART6, a spare telemetry link on ZIO CN10 (Arduino D1/D0).
++ * MAVLink to the GCS goes over the USB CDC (/dev/ttyACM0), as on the
++ * ArduPilot side of this bench.
++ *
++ * There is no RC receiver on this board.
++ */
++#define RC_SERIAL_PORT                      ""
++
++/* Parameters ***************************************************************/
++/* No SD card and no FRAM on a Nucleo: parameters live in the last flash
++ * sector. Sector 11 of the F767ZI's single 2 MB bank is 256 KB at
++ * 0x081C0000; the linker script (nuttx-config/scripts/script.ld) stops the
++ * image at exactly that address.
++ */
++#define FLASH_BASED_PARAMS
++
++/* Misc *********************************************************************/
++
++/* This board provides a DMA pool and APIs */
++#define BOARD_DMA_ALLOC_POOL_SIZE           5120
++
++/* This board provides the board_on_reset interface */
++#define BOARD_HAS_ON_RESET                  1
++
++#define PX4_GPIO_INIT_LIST { \
++		GPIO_CAN1_TX,        \
++		GPIO_CAN1_RX,        \
++	}
++
++#define BOARD_ENABLE_CONSOLE_BUFFER
++
++__BEGIN_DECLS
++
++#ifndef __ASSEMBLY__
++
++/****************************************************************************
++ * Public Functions
++ ****************************************************************************/
++
++/****************************************************************************
++ * Name: stm32_spiinitialize
++ *
++ * Description:
++ *   Called to configure SPI chip select GPIO pins for the board.
++ *
++ ****************************************************************************/
++
++extern void stm32_spiinitialize(void);
++
++extern void stm32_usbinitialize(void);
++
++extern void board_peripheral_reset(int ms);
++
++#include <px4_platform_common/board_common.h>
++
++#endif /* __ASSEMBLY__ */
++
++__END_DECLS
+diff --git a/boards/st/nucleo-f767zi/src/init.c b/boards/st/nucleo-f767zi/src/init.c
+new file mode 100644
+index 0000000000..7a975b9447
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/src/init.c
+@@ -0,0 +1,240 @@
++/****************************************************************************
++ *
++ *   Copyright (c) 2019-2020 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++/**
++ * @file init.c
++ *
++ * Board-specific early startup code.  This file implements the
++ * board_app_initializ() function that is called early by nsh during startup.
++ *
++ * Code here is run before the rcS script is invoked; it should start required
++ * subsystems and perform board-specific initialisation.
++ */
++
++/****************************************************************************
++ * Included Files
++ ****************************************************************************/
++
++#include "board_config.h"
++
++#include <stdbool.h>
++#include <stdio.h>
++#include <string.h>
++#include <debug.h>
++#include <errno.h>
++#include <syslog.h>
++
++#include <nuttx/config.h>
++#include <nuttx/board.h>
++#include <nuttx/spi/spi.h>
++#include <nuttx/mm/gran.h>
++#include <chip.h>
++#include <stm32_uart.h>
++#include <arch/board/board.h>
++#include "arm_internal.h"
++
++#include <px4_arch/io_timer.h>
++#include <drivers/drv_hrt.h>
++#include <drivers/drv_board_led.h>
++#include <systemlib/px4_macros.h>
++#include <px4_platform_common/init.h>
++#include <px4_platform/gpio.h>
++#include <px4_platform/board_dma_alloc.h>
++
++#if defined(FLASH_BASED_PARAMS)
++#  include <parameters/flashparams/flashfs.h>
++#endif
++
++/****************************************************************************
++ * Pre-Processor Definitions
++ ****************************************************************************/
++
++/* Configuration ************************************************************/
++
++/*
++ * Ideally we'd be able to get these from arm_internal.h,
++ * but since we want to be able to disable the NuttX use
++ * of leds for system indication at will and there is no
++ * separate switch, we need to build independent of the
++ * CONFIG_ARCH_LEDS configuration switch.
++ */
++__BEGIN_DECLS
++extern void led_init(void);
++extern void led_on(int led);
++extern void led_off(int led);
++__END_DECLS
++
++/************************************************************************************
++ * Name: board_peripheral_reset
++ *
++ * Description:
++ *
++ ************************************************************************************/
++__EXPORT void board_peripheral_reset(int ms)
++{
++	/* Nothing to do: nothing on this board sits behind a switchable rail.
++	 * The "sensors" are a separate microcontroller with its own supply --
++	 * power-cycling them is a uhubctl job on the bench host, not ours.
++	 */
++	UNUSED(ms);
++}
++
++/************************************************************************************
++ * Name: board_on_reset
++ *
++ * Description:
++ * Optionally provided function called on entry to board_system_reset
++ * It should perform any house keeping prior to the rest.
++ *
++ * status - 1 if resetting to boot loader
++ *          0 if just resetting
++ *
++ ************************************************************************************/
++__EXPORT void board_on_reset(int status)
++{
++	for (int i = 0; i < DIRECT_PWM_OUTPUT_CHANNELS; ++i) {
++		px4_arch_configgpio(PX4_MAKE_GPIO_INPUT(io_timer_channel_get_as_pwm_input(i)));
++	}
++
++	/*
++	 * On resets invoked from system (not boot) ensure we establish a low
++	 * output state on PWM pins to disarm the ESC and prevent the reset from potentially
++	 * spinning up the motors.
++	 */
++	if (status >= 0) {
++		up_mdelay(100);
++	}
++}
++
++/************************************************************************************
++ * Name: stm32_boardinitialize
++ *
++ * Description:
++ *   All STM32 architectures must provide the following entry point.  This entry point
++ *   is called early in the initialization -- after all memory has been configured
++ *   and mapped but before any devices have been initialized.
++ *
++ ************************************************************************************/
++
++__EXPORT void
++stm32_boardinitialize(void)
++{
++	board_on_reset(-1); /* Reset PWM first thing */
++
++	/* configure LEDs */
++	board_autoled_initialize();
++
++	/* configure pins */
++	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
++	px4_gpio_init(gpio, arraySize(gpio));
++
++	/* configure USB interfaces */
++	stm32_usbinitialize();
++}
++
++/****************************************************************************
++ * Name: board_app_initialize
++ *
++ * Description:
++ *   Perform application specific initialization.  This function is never
++ *   called directly from application code, but only indirectly via the
++ *   (non-standard) boardctl() interface using the command BOARDIOC_INIT.
++ *
++ * Input Parameters:
++ *   arg - The boardctl() argument is passed to the board_app_initialize()
++ *         implementation without modification.  The argument has no
++ *         meaning to NuttX; the meaning of the argument is a contract
++ *         between the board-specific initialization logic and the the
++ *         matching application logic.  The value cold be such things as a
++ *         mode enumeration value, a set of DIP switch switch settings, a
++ *         pointer to configuration data read from a file or serial FLASH,
++ *         or whatever you would like to do with it.  Every implementation
++ *         should accept zero/NULL as a default configuration.
++ *
++ * Returned Value:
++ *   Zero (OK) is returned on success; a negated errno value is returned on
++ *   any failure to indicate the nature of the failure.
++ *
++ ****************************************************************************/
++
++
++__EXPORT int board_app_initialize(uintptr_t arg)
++{
++	px4_platform_init();
++
++	stm32_spiinitialize();
++
++	/* configure the DMA allocator */
++	if (board_dma_alloc_init() < 0) {
++		syslog(LOG_ERR, "[boot] DMA alloc FAILED\n");
++	}
++
++#if defined(SERIAL_HAVE_RXDMA)
++	// set up the serial DMA polling at 1ms intervals for received bytes that have not triggered a DMA event.
++	static struct hrt_call serial_dma_call;
++	hrt_call_every(&serial_dma_call, 1000, 1000, (hrt_callout)stm32_serial_dma_poll, NULL);
++#endif
++
++	/* initial LED state */
++	drv_led_start();
++	led_off(LED_RED);
++	led_on(LED_GREEN); // Indicate Power.
++	led_off(LED_BLUE);
++
++	if (board_hardfault_init(2, true) != 0) {
++		led_on(LED_RED);
++	}
++
++#if defined(FLASH_BASED_PARAMS)
++	/* No SD card and no FRAM: parameters live in flash sector 11, the last
++	 * 256 KB of the F767ZI's 2 MB bank. The linker script stops the image at
++	 * 0x081C0000 so this sector is never part of the firmware image.
++	 */
++	static sector_descriptor_t params_sector_map[] = {
++		{11, 256 * 1024, 0x081C0000},
++		{0, 0, 0},
++	};
++
++	if (parameter_flashfs_init(params_sector_map, NULL, 0) != OK) {
++		syslog(LOG_ERR, "[boot] parameter_flashfs_init FAILED\n");
++		led_on(LED_RED);
++	}
++
++#endif /* FLASH_BASED_PARAMS */
++
++	/* Configure the HW based on the manifest */
++
++	px4_platform_configure();
++
++	return OK;
++}
+diff --git a/boards/st/nucleo-f767zi/src/led.c b/boards/st/nucleo-f767zi/src/led.c
+new file mode 100644
+index 0000000000..be5c074f5d
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/src/led.c
+@@ -0,0 +1,103 @@
++/****************************************************************************
++ *
++ *   Copyright (c) 2019 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++/**
++ * @file led.c
++ *
++ * LED backend.
++ */
++
++#include <px4_platform_common/px4_config.h>
++
++#include <stdbool.h>
++
++#include "chip.h"
++#include "stm32_gpio.h"
++#include "board_config.h"
++
++#include <nuttx/board.h>
++#include <arch/board/board.h>
++
++/*
++ * Ideally we'd be able to get these from arm_internal.h,
++ * but since we want to be able to disable the NuttX use
++ * of leds for system indication at will and there is no
++ * separate switch, we need to build independent of the
++ * CONFIG_ARCH_LEDS configuration switch.
++ */
++__BEGIN_DECLS
++extern void led_init(void);
++extern void led_on(int led);
++extern void led_off(int led);
++extern void led_toggle(int led);
++__END_DECLS
++
++static uint32_t g_ledmap[] = {
++	GPIO_nLED_BLUE,                     // Indexed by LED_BLUE
++	GPIO_nLED_RED,                      // Indexed by LED_RED
++	GPIO_nLED_GREEN,                    // Indexed by LED_GREEN
++};
++
++__EXPORT void led_init(void)
++{
++	for (size_t l = 0; l < (sizeof(g_ledmap) / sizeof(g_ledmap[0])); l++) {
++		stm32_configgpio(g_ledmap[l]);
++	}
++}
++
++static void phy_set_led(int led, bool state)
++{
++	/* Nucleo user LEDs are ACTIVE HIGH: drive high to switch on */
++	stm32_gpiowrite(g_ledmap[led], state);
++}
++
++static bool phy_get_led(int led)
++{
++	/* If High it is on */
++	return stm32_gpioread(g_ledmap[led]);
++}
++
++__EXPORT void led_on(int led)
++{
++	phy_set_led(led, true);
++}
++
++__EXPORT void led_off(int led)
++{
++	phy_set_led(led, false);
++}
++
++__EXPORT void led_toggle(int led)
++{
++	phy_set_led(led, !phy_get_led(led));
++}
+diff --git a/boards/st/nucleo-f767zi/src/spi.cpp b/boards/st/nucleo-f767zi/src/spi.cpp
+new file mode 100644
+index 0000000000..9a2902907e
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/src/spi.cpp
+@@ -0,0 +1,62 @@
++/****************************************************************************
++ *
++ *   Copyright (C) 2026 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++#include <px4_arch/spi_hw_description.h>
++#include <drivers/drv_sensor.h>
++#include <nuttx/spi/spi.h>
++
++/* One bus: SPI3 (PB3 SCK / PB4 MISO / PB5 MOSI) with four chip selects on
++ * port D. Every device on it is the rotanimb01 harness pretending to be
++ * silicon, so the chip selects are the harness's demux inputs:
++ *
++ *   PD3 accel   PD4 gyro   PD5 baro   PD6 mag
++ *
++ * There are no DRDY lines: the harness's interrupt pins are not wired to the
++ * DUT, so all four drivers run on their internal poll schedules. Identical
++ * to the ArduPilot NucleoF767ZI hwdef, which the same harness flies.
++ *
++ * Bus mode and speed are NOT set here -- PX4 takes them from the driver.
++ * These parts are all started with `-m 0` (SPI mode 0) from rc.board_sensors:
++ * a real BMI088/BMP390/RM3100 auto-detects the clock phase per transaction,
++ * a register-level bus emulator cannot, so the whole bus is pinned to mode 0.
++ */
++constexpr px4_spi_bus_t px4_spi_buses[SPI_BUS_MAX_BUS_ITEMS] = {
++	initSPIBus(SPI::Bus::SPI3, {
++		initSPIDevice(DRV_ACC_DEVTYPE_BMI088, SPI::CS{GPIO::PortD, GPIO::Pin3}),
++		initSPIDevice(DRV_GYR_DEVTYPE_BMI088, SPI::CS{GPIO::PortD, GPIO::Pin4}),
++		initSPIDevice(DRV_BARO_DEVTYPE_BMP388, SPI::CS{GPIO::PortD, GPIO::Pin5}),
++		initSPIDevice(DRV_MAG_DEVTYPE_RM3100, SPI::CS{GPIO::PortD, GPIO::Pin6}),
++	}),
++};
++
++static constexpr bool unused = validateSPIConfig(px4_spi_buses);
+diff --git a/boards/st/nucleo-f767zi/src/timer_config.cpp b/boards/st/nucleo-f767zi/src/timer_config.cpp
+new file mode 100644
+index 0000000000..8692a7f4b9
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/src/timer_config.cpp
+@@ -0,0 +1,61 @@
++/****************************************************************************
++ *
++ *   Copyright (C) 2026 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++#include <px4_arch/io_timer_hw_description.h>
++
++/* Eight servo outputs into the harness's PWM capture:
++ *
++ *   PWM1-4  TIM3 CH1-4  PC6 PC7 PC8 PC9
++ *   PWM5-8  TIM4 CH1-4  PD12 PD13 PD14 PD15
++ *
++ * Order matters: PX4's channel N is timer_io_channels[N-1], and the harness
++ * expects ArduPilot's mapping (1..8 = the hwdef's PWM(1)..PWM(8)).
++ */
++constexpr io_timers_t io_timers[MAX_IO_TIMERS] = {
++	initIOTimer(Timer::Timer3),
++	initIOTimer(Timer::Timer4),
++};
++
++constexpr timer_io_channels_t timer_io_channels[MAX_TIMER_IO_CHANNELS] = {
++	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::Channel1}, {GPIO::PortC, GPIO::Pin6}),
++	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::Channel2}, {GPIO::PortC, GPIO::Pin7}),
++	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::Channel3}, {GPIO::PortC, GPIO::Pin8}),
++	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::Channel4}, {GPIO::PortC, GPIO::Pin9}),
++	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::Channel1}, {GPIO::PortD, GPIO::Pin12}),
++	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::Channel2}, {GPIO::PortD, GPIO::Pin13}),
++	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::Channel3}, {GPIO::PortD, GPIO::Pin14}),
++	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::Channel4}, {GPIO::PortD, GPIO::Pin15}),
++};
++
++constexpr io_timers_channel_mapping_t io_timers_channel_mapping =
++	initIOTimerChannelMapping(io_timers, timer_io_channels);
+diff --git a/boards/st/nucleo-f767zi/src/usb.c b/boards/st/nucleo-f767zi/src/usb.c
+new file mode 100644
+index 0000000000..52ef049019
+--- /dev/null
++++ b/boards/st/nucleo-f767zi/src/usb.c
+@@ -0,0 +1,106 @@
++/****************************************************************************
++ *
++ *   Copyright (C) 2019 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++/**
++ * @file usb.c
++ *
++ * Board-specific USB functions.
++ */
++
++/************************************************************************************
++ * Included Files
++ ************************************************************************************/
++
++#include <px4_platform_common/px4_config.h>
++
++#include <sys/types.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <debug.h>
++
++#include <nuttx/usb/usbdev.h>
++#include <nuttx/usb/usbdev_trace.h>
++
++#include <arm_internal.h>
++#include <chip.h>
++#include <stm32_gpio.h>
++#include <stm32_otg.h>
++#include "board_config.h"
++
++/************************************************************************************
++ * Definitions
++ ************************************************************************************/
++
++/************************************************************************************
++ * Private Functions
++ ************************************************************************************/
++
++/************************************************************************************
++ * Public Functions
++ ************************************************************************************/
++
++/************************************************************************************
++ * Name: stm32_usbinitialize
++ *
++ * Description:
++ *   Called to setup USB-related GPIO pins for the board.
++ *
++ ************************************************************************************/
++
++__EXPORT void stm32_usbinitialize(void)
++{
++	/* The OTG FS has an internal soft pull-up; PA11/PA12 are muxed by the OTG
++	 * FS driver itself. All that is left is the pulled-up pseudo-VBUS input
++	 * (see GPIO_OTGFS_VBUS in board_config.h).
++	 */
++
++#ifdef CONFIG_STM32F7_OTGFS
++	stm32_configgpio(GPIO_OTGFS_VBUS);
++#endif
++}
++
++/************************************************************************************
++ * Name:  stm32_usbsuspend
++ *
++ * Description:
++ *   Board logic must provide the stm32_usbsuspend logic if the USBDEV driver is
++ *   used.  This function is called whenever the USB enters or leaves suspend mode.
++ *   This is an opportunity for the board logic to shutdown clocks, power, etc.
++ *   while the USB is suspended.
++ *
++ ************************************************************************************/
++
++__EXPORT void stm32_usbsuspend(FAR struct usbdev_s *dev, bool resume)
++{
++	uinfo("resume: %d\n", resume);
++}
+-- 
+2.50.1 (Apple Git-155)
+

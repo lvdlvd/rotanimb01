@@ -1,9 +1,9 @@
 # F5 checkride — test report, bench nights of 2026-07-14/15
 
 DUT: stock ArduPlane (master, ~4.7-dev) on NucleoF767ZI, hwdef branch
-`nucleo-f767-hitl`. Harness: rotanimb01 on the G474 breakout, FDM mode 1
+(now dut/ardupilot). Harness: rotanimb01 on the G474 breakout, FDM mode 1
 (Kitfox V). Bench driver: pymavlink over a Pi serial bridge (F767 side)
-plus pseudocan on the harness CDC; compinator as independent bus witness.
+plus pseudocan on the harness CDC; an independent CAN sniffer as bus witness.
 
 ## Verdict
 
@@ -27,7 +27,7 @@ ground model made TAKEOFF mode the standard departure (night 6, after
 disabling the DCM fallback the gyro bias walk corrupts); the SITL rig
 completed the pitch autotune; and after three latent bench defects
 fell (RAM-only PWM cal, RAM-only autotune roll gains, ARSPD_RATIO),
-both owner-defined loiter legs fly on the bench IDENTICALLY to the
+both reference loiter legs fly on the bench IDENTICALLY to the
 pure-software model: std 29.0±0.1 m/s R568, fast 38.0±0.1 m/s R374.
 See "Night 7" below. F5 acceptance: takeoff, FBWA, LOITER (both
 legs), TECS — all PASS through the full emulated sensor path.
@@ -39,7 +39,7 @@ legs), TECS — all PASS through the full emulated sensor path.
 | SPI sensor emulation vs ArduPilot drivers | boot probes clean, gyro/accel/baro/mag stream at configured rates, unexp/stray 0                     |
 | Baro/mag/accel plausibility               | RAW_IMU (0,0,-1000) mg parked; 1013.25 hPa; earth field 48.33 µT @ 65.6° incl                        |
 | PWM capture of ArduPilot servo outputs    | harness heartbeat mirrors SERVO_OUTPUT_RAW incl. FBWA demands                                        |
-| DroneCAN feeder wire format               | compinator witnessed complete 10-frame Fix2 + 3-frame RawAir + NodeStatus, tids/toggles/CRCs correct |
+| DroneCAN feeder wire format               | bus sniffer witnessed complete 10-frame Fix2 + 3-frame RawAir + NodeStatus, tids/toggles/CRCs correct |
 | ArduPilot GPS/airspeed ingestion          | GPS_RAW_INT fix 3 / 12 sats / origin coords; AIRSPEED healthy after ARSPD_SKIP_CAL                   |
 | EKF3                                      | "EKF3 IMU0 is using GPS", origin+home set, level parked estimate (0.0°/-0.0°)                        |
 | Cal + arming path                         | fixed-yaw magcal accepted; arm succeeds parked; PreArm list emptied legitimately                     |
@@ -47,7 +47,7 @@ legs), TECS — all PASS through the full emulated sensor path.
 
 ## Defects found and fixed by this campaign (the point of HITL)
 
-Harness/n-array side:
+Harness side:
 1. FDCAN clock + pins + IRQ handlers + vector entries all scoped to
    TRANSPORT_CAN — the on-board feeder was stone dead in USB builds
    (three separate fixes; found via scope + NULL-vector crashdump).
@@ -56,7 +56,7 @@ Harness/n-array side:
    Masked for days because the DUT never transmitted (dead transceiver);
    every "bizarre" harness death traced here.
 3. Fix2 needs 13 frames/burst; G4 FDCAN has 3 tx buffers — silent
-   truncation of every transfer. Fixed with canmsgq (now n-array lib).
+   truncation of every transfer. Fixed with canmsgq (now nlib).
 4. Crash-freeze served free-fall truth (zero specific force) — poisoned
    the DUT's AHRS while "parked". Fixed: rest truth at frozen attitude.
 5. ...which still parked at the CRASH attitude, poisoning every ground
@@ -84,7 +84,7 @@ ArduPilot-side knowledge captured (nothing patched, all parm/procedure):
     effectively impossible.
 13. F7 bxCAN ESR decoding: REC climbing + LEC bit-dominant + zero rx =
     transceiver cannot drive the bus (was: dead 5 V rail, then swapped
-    PD0/PD1). The compinator's ACKs masked it from the harness view.
+    PD0/PD1). The sniffer's ACKs masked it from the harness view.
 
 Bench infrastructure lessons: single-TT USB hubs pass enumeration but
 starve bulk data with 4 FS devices (all-silent-ports symptom); stale
@@ -105,7 +105,7 @@ matching on PARAM_VALUE and an add_message monkeypatch.
 
 ## Night 2 addendum: the ground model flew it
 
-The balloon-drop proposal below was superseded by the owner's call: a
+The balloon-drop proposal below was superseded by a decision: a
 minimal-fidelity tricycle ground model instead (no pitch change in the
 ground roll, accelerate to Vstall, rotate, climb at Vx, no flaps). As
 built: ground-speed/yaw/pitch DOFs, rolling friction with lift
@@ -114,7 +114,7 @@ donuts at 21 m/s — ArduPilot's steering loop vs an unwashed nosewheel),
 rotation about the mains against the CG-forward weight moment (Vr
 emergent), liftoff when lift + thrust vertical carries the weight;
 gentle touchdowns roll out, harsh contacts re-park the wreck level with
-a latched crash count. The prop became power-based per the owner's
+a latched crash count. The prop became power-based per the reference aircraft's
 engine data (100 hp, eta 0.50 static to 0.85 at 50%-power cruise,
 momentum-theory static cap ~1600 N) — host golden: 134 m ground run vs
 POH ~90 m, liftoff emergent at 26 m/s.
@@ -157,12 +157,9 @@ orbit at 178 m. Total airborne time ~8 minutes.
 The bench itself has no open defects. The remaining deltas are
 ArduPlane parameter tuning against this airframe (TECS_CLMB_MAX, L1
 period, pitch limits) and FDM PARAM_SET tuning — which is precisely the
-work this bench exists to host. Next: the multi-MCU stage — ardu +
-vnavigator/cnav on a separate microcontroller, then the visual
-positioning from the parallel session; end goal, per the owner: "a pile
-of microcontrollers flying a simulated kitfox around just like i would
-do with my eyes and my hands and my meat brains, with some claim to
-fidelity."
+work this bench exists to host. End goal: "a pile of microcontrollers
+flying a simulated light aircraft around just like I would do with my
+eyes and my hands and my meat brains, with some claim to fidelity."
 
 ## Night 3 addendum: noise on, tuning holds
 
@@ -194,7 +191,7 @@ oscillation detector was reading the departure itself. Pitch stays at
 defaults; its FF did converge (~1.65 twice), so a completed tune wants
 more altitude and gentler floor recovery. Demand-vs-achieved logging
 (now in the mission driver) reframes the loiter question: even at the
-owner-prescribed rate-turn radius (300 m), L1 demands median 37 deg
+prescribed rate-turn radius (300 m), L1 demands median 37 deg
 of bank where geometry needs 19 — the orbit never settles — and
 median roll tracking error is ~20 deg across all gain sets (60 ms
 servo lag phase cost + flying 32-36 m/s instead of 25 because TECS
@@ -209,14 +206,14 @@ spislave redesign.
 
 ## Night 5: the instrumented loiter campaign
 
-Owner definitions encoded as bench-standard legs: STANDARD loiter =
+Reference definitions encoded as bench-standard legs: STANDARD loiter =
 3 deg/s at (cruise+stall)/2; FAST loiter = 6 deg/s at cruise. The
 instrumented mission (25 Hz ATTITUDE, 10 Hz NAV/HUD, CSV) flew them
 and the analysis produced a chain of findings, each unblocking the
 next:
 
 1. The model's true cruise is ~38 m/s at 45% throttle — matching the
-   owner's 90 kt Kitfox (the prop model IS his engine). The bench had
+   reference aircraft's 90 kt cruise (the prop model IS its engine). The bench had
    been flying with AIRSPEED_CRUISE 25, an arbitrary early guess.
 2. First legs commanded 22 m/s — BELOW the accelerated stall at the
    banks demanded (40 deg -> load factor 1.3 -> stall 22.6). The

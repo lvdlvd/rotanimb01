@@ -176,7 +176,7 @@ symbols (a stray `pow` quietly linking soft-double is exactly the
 regression this catches). Position stays int32 cm as above — the one
 place float32 genuinely can't serve.
 
-The host golden build keeps working because n-array already has the
+The host golden build keeps working because the library already has the
 pattern: fdm.c calls the cordic float API, which the emul library
 implements on the host (examples/cordic's diff-test machinery) — same
 source, bit-similar results, CI without hardware.
@@ -248,7 +248,7 @@ option with the simple 3-point spring-damper sketch; until then,
 ArduPlane modes exercised are everything airborne: FBWA/FBWB, LOITER,
 AUTO, RTL, TECS behavior, failsafes.
 
-## CAN dictionary extension
+## CAN dictionary extension (design draft — the as-built IDs are in src/canmsg.h: TMC 0x43-0x49, TRUTH_* MEAS 0x44-0x4A)
 
 Adds to the harness doc's dictionary (classic 8-byte frames):
 
@@ -343,14 +343,14 @@ where noted.
   Kitfox data. The calibration checklist is the mitigation; expect one
   good tuning session, not zero.
 - ~~**No ground model** in v1~~ — v1.1 grew a minimal-fidelity tricycle
-  ground model (owner's spec: pretend tricycle gear, so no pitch change
+  ground model (the reference aircraft's spec: pretend tricycle gear, so no pitch change
   in the roll; accelerate to Vstall, rotate, climb at Vx; no flaps):
   ground-speed/yaw/pitch DOFs, rolling friction with lift unloading,
   nosewheel steering from rudder with speed washout, rotation about the
   mains against the CG-forward weight moment (Vr is emergent), liftoff
   when lift + thrust vertical carries the weight; gentle touchdowns
   roll out, harsh ones re-park the wreck level with a latched crash
-  count. The prop is power-based per the owner's engine data (100 hp,
+  count. The prop is power-based per the reference aircraft's engine data (100 hp,
   eta 0.50 static to 0.85 at cruise, momentum-theory static cap).
   Air-start teleports turned out EKF-hostile — real takeoffs are the
   transition mechanism now (full story in doc/F5-TESTREPORT).

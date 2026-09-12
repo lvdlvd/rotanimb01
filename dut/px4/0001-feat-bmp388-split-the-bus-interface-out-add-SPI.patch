@@ -1,0 +1,489 @@
+From bc1f5815cb47148c7489cfcd7dc35c2aa9d7859d Mon Sep 17 00:00:00 2001
+From: Luuk van Dijk <lvd@mndmttr.net>
+Date: Tue, 1 Sep 2026 07:03:47 +0200
+Subject: [PATCH] feat(bmp388): split the bus interface out, add SPI
+
+The driver was I2C-only with the bus calls inlined. Factor the
+in-tree interface pattern out (bmp388_i2c.cpp) and add an SPI
+interface (bmp388_spi.cpp): SPI reads are 0x80|reg followed by one
+dummy byte before data, per the BMP388/BMP390 datasheet interface
+description. No behavior change on I2C.
+---
+ src/drivers/barometer/bmp388/CMakeLists.txt  |   2 +
+ src/drivers/barometer/bmp388/bmp388.cpp      |  34 +++---
+ src/drivers/barometer/bmp388/bmp388.h        |  26 ++++-
+ src/drivers/barometer/bmp388/bmp388_i2c.cpp  |  89 +++++++++++++++
+ src/drivers/barometer/bmp388/bmp388_main.cpp |  53 ++++++++-
+ src/drivers/barometer/bmp388/bmp388_spi.cpp  | 109 +++++++++++++++++++
+ 6 files changed, 286 insertions(+), 27 deletions(-)
+ create mode 100644 src/drivers/barometer/bmp388/bmp388_i2c.cpp
+ create mode 100644 src/drivers/barometer/bmp388/bmp388_spi.cpp
+
+diff --git a/src/drivers/barometer/bmp388/CMakeLists.txt b/src/drivers/barometer/bmp388/CMakeLists.txt
+index 0552dcc178..9ab56956ac 100644
+--- a/src/drivers/barometer/bmp388/CMakeLists.txt
++++ b/src/drivers/barometer/bmp388/CMakeLists.txt
+@@ -37,7 +37,9 @@ px4_add_module(
+ 	SRCS
+ 		bmp388.cpp
+ 		bmp388.h
++		bmp388_i2c.cpp
+ 		bmp388_main.cpp
++		bmp388_spi.cpp
+ 	DEPENDS
+ 		drivers_barometer
+ 		px4_work_queue
+diff --git a/src/drivers/barometer/bmp388/bmp388.cpp b/src/drivers/barometer/bmp388/bmp388.cpp
+index 2da72afc0d..80416806a7 100644
+--- a/src/drivers/barometer/bmp388/bmp388.cpp
++++ b/src/drivers/barometer/bmp388/bmp388.cpp
+@@ -40,12 +40,11 @@
+ 
+ using namespace time_literals;
+ 
+-BMP388::BMP388(const I2CSPIDriverConfig &config) :
+-	I2C(config),
++BMP388::BMP388(device::Device *interface, const I2CSPIDriverConfig &config) :
+ 	I2CSPIDriver(config),
+-	_px4_baro(get_device_id())
++	_interface(interface),
++	_px4_baro(interface->get_device_id())
+ {
+-	_retries = 1;
+ }
+ 
+ BMP388::~BMP388()
+@@ -53,19 +52,18 @@ BMP388::~BMP388()
+ 	perf_free(_bad_transfer_perf);
+ 	perf_free(_conversion_timeout_perf);
+ 	perf_free(_reset_perf);
++
++	delete _interface;
+ }
+ 
+ int BMP388::init()
+ {
+-	const int ret = I2C::init();
+-
+-	if (ret != PX4_OK) {
+-		DEVICE_DEBUG("I2C::init failed (%i)", ret);
+-		return ret;
++	if (Probe() != PX4_OK) {
++		return PX4_ERROR;
+ 	}
+ 
+-	// probe() may have refined the device type to BMP390
+-	_px4_baro.set_device_id(get_device_id());
++	// Probe() may have refined the device type to BMP390
++	_px4_baro.set_device_id(_interface->get_device_id());
+ 
+ 	_state = STATE::RESET;
+ 	ScheduleNow();
+@@ -73,7 +71,7 @@ int BMP388::init()
+ 	return PX4_OK;
+ }
+ 
+-int BMP388::probe()
++int BMP388::Probe()
+ {
+ 	for (int i = 0; i < 3; i++) {
+ 		const uint8_t chip_id = RegisterRead(Register::CHIP_ID);
+@@ -83,14 +81,14 @@ int BMP388::probe()
+ 			_rev_id = RegisterRead(Register::REV_ID);
+ 
+ 			if (chip_id == BMP390_CHIP_ID) {
+-				set_device_type(DRV_BARO_DEVTYPE_BMP390);
++				_interface->set_device_type(DRV_BARO_DEVTYPE_BMP390);
+ 				_item_name = "bmp390";
+ 			}
+ 
+ 			return PX4_OK;
+ 		}
+ 
+-		DEVICE_DEBUG("unexpected CHIP_ID 0x%02x", chip_id);
++		PX4_DEBUG("unexpected CHIP_ID 0x%02x", chip_id);
+ 	}
+ 
+ 	return PX4_ERROR;
+@@ -373,9 +371,7 @@ uint64_t BMP388::CompensatePressure(uint32_t uncomp_press, int64_t t_lin) const
+ 
+ bool BMP388::RegisterRead(Register reg, void *buf, size_t len)
+ {
+-	const uint8_t cmd = static_cast<uint8_t>(reg);
+-
+-	if (transfer(&cmd, 1, static_cast<uint8_t *>(buf), len) != PX4_OK) {
++	if (_interface->read(static_cast<uint8_t>(reg), buf, len) != PX4_OK) {
+ 		perf_count(_bad_transfer_perf);
+ 		return false;
+ 	}
+@@ -392,9 +388,7 @@ uint8_t BMP388::RegisterRead(Register reg)
+ 
+ bool BMP388::RegisterWrite(Register reg, uint8_t value)
+ {
+-	const uint8_t buf[2] {static_cast<uint8_t>(reg), value};
+-
+-	if (transfer(buf, sizeof(buf), nullptr, 0) != PX4_OK) {
++	if (_interface->write(static_cast<uint8_t>(reg), &value, 1) != PX4_OK) {
+ 		perf_count(_bad_transfer_perf);
+ 		return false;
+ 	}
+diff --git a/src/drivers/barometer/bmp388/bmp388.h b/src/drivers/barometer/bmp388/bmp388.h
+index 4ced79c46d..c182b678f0 100644
+--- a/src/drivers/barometer/bmp388/bmp388.h
++++ b/src/drivers/barometer/bmp388/bmp388.h
+@@ -35,7 +35,7 @@
+ 
+ #include <drivers/drv_hrt.h>
+ #include <lib/drivers/barometer/PX4Barometer.hpp>
+-#include <lib/drivers/device/i2c.h>
++#include <lib/drivers/device/Device.hpp>
+ #include <lib/perf/perf_counter.h>
+ #include <px4_platform_common/i2c_spi_buses.h>
+ 
+@@ -46,6 +46,7 @@ namespace Bosch_BMP388
+ {
+ 
+ static constexpr uint32_t I2C_SPEED = 100 * 1000;
++static constexpr uint32_t SPI_SPEED = 10 * 1000 * 1000;
+ 
+ static constexpr uint8_t BMP388_CHIP_ID = 0x50;
+ static constexpr uint8_t BMP390_CHIP_ID = 0x60;
+@@ -138,21 +139,34 @@ static_assert(sizeof(sensor_data) == 6);
+ 
+ using namespace Bosch_BMP388;
+ 
+-class BMP388 : public device::I2C, public I2CSPIDriver<BMP388>
++/* Bus interfaces. The BMP3xx register protocol differs between the two buses:
++ * an SPI read sets bit 7 of the address and the part inserts one dummy byte
++ * before the data, an I2C read does neither. Everything above this line is
++ * bus-agnostic, so the split is exactly these two factories.
++ */
++#if defined(CONFIG_SPI)
++extern device::Device *BMP388_SPI_interface(int bus, uint32_t devid, int bus_frequency, spi_mode_e spi_mode);
++#endif // CONFIG_SPI
++#if defined(CONFIG_I2C)
++extern device::Device *BMP388_I2C_interface(int bus, uint8_t address, int bus_frequency);
++#endif // CONFIG_I2C
++
++class BMP388 : public I2CSPIDriver<BMP388>
+ {
+ public:
+-	BMP388(const I2CSPIDriverConfig &config);
++	BMP388(device::Device *interface, const I2CSPIDriverConfig &config);
+ 	~BMP388() override;
+ 
++	static I2CSPIDriverBase *instantiate(const I2CSPIDriverConfig &config, int runtime_instance);
+ 	static void print_usage();
+ 
+-	int init() override;
++	int init();
+ 	void print_status() override;
+ 
+ 	void RunImpl();
+ 
+ private:
+-	int probe() override;
++	int Probe();
+ 
+ 	bool Configure();
+ 	bool Measure();
+@@ -168,6 +182,8 @@ private:
+ 	uint8_t RegisterRead(Register reg);
+ 	bool RegisterWrite(Register reg, uint8_t value);
+ 
++	device::Device *_interface{nullptr};
++
+ 	PX4Barometer _px4_baro;
+ 
+ 	perf_counter_t _bad_transfer_perf{perf_alloc(PC_COUNT, MODULE_NAME": bad transfer")};
+diff --git a/src/drivers/barometer/bmp388/bmp388_i2c.cpp b/src/drivers/barometer/bmp388/bmp388_i2c.cpp
+new file mode 100644
+index 0000000000..4c382ad563
+--- /dev/null
++++ b/src/drivers/barometer/bmp388/bmp388_i2c.cpp
+@@ -0,0 +1,89 @@
++/****************************************************************************
++ *
++ *   Copyright (c) 2019-2026 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++
++/**
++ * @file bmp388_i2c.cpp
++ *
++ * I2C interface for the BMP388/BMP390: register address, then data, no dummy
++ * byte and no direction bit.
++ */
++
++#include "bmp388.h"
++
++#include <lib/drivers/device/i2c.h>
++
++#if defined(CONFIG_I2C)
++
++class BMP388_I2C : public device::I2C
++{
++public:
++	BMP388_I2C(int bus, uint8_t address, int bus_frequency);
++	~BMP388_I2C() override = default;
++
++	int read(unsigned address, void *data, unsigned count) override;
++	int write(unsigned address, void *data, unsigned count) override;
++};
++
++device::Device *BMP388_I2C_interface(int bus, uint8_t address, int bus_frequency)
++{
++	return new BMP388_I2C(bus, address, bus_frequency);
++}
++
++BMP388_I2C::BMP388_I2C(int bus, uint8_t address, int bus_frequency) :
++	I2C(DRV_BARO_DEVTYPE_BMP388, MODULE_NAME, bus, address, bus_frequency)
++{
++	_retries = 1;
++}
++
++int BMP388_I2C::read(unsigned address, void *data, unsigned count)
++{
++	const uint8_t cmd = address;
++	return transfer(&cmd, 1, static_cast<uint8_t *>(data), count);
++}
++
++int BMP388_I2C::write(unsigned address, void *data, unsigned count)
++{
++	uint8_t buf[32];
++
++	if (sizeof(buf) < count + 1) {
++		return -EIO;
++	}
++
++	buf[0] = address;
++	memcpy(&buf[1], data, count);
++
++	return transfer(&buf[0], count + 1, nullptr, 0);
++}
++
++#endif // CONFIG_I2C
+diff --git a/src/drivers/barometer/bmp388/bmp388_main.cpp b/src/drivers/barometer/bmp388/bmp388_main.cpp
+index 3420d1e1f2..1b29c6186d 100644
+--- a/src/drivers/barometer/bmp388/bmp388_main.cpp
++++ b/src/drivers/barometer/bmp388/bmp388_main.cpp
+@@ -38,12 +38,56 @@
+ 
+ #include <string.h>
+ 
++I2CSPIDriverBase *BMP388::instantiate(const I2CSPIDriverConfig &config, int runtime_instance)
++{
++	device::Device *interface = nullptr;
++
++#if defined(CONFIG_I2C)
++
++	if (config.bus_type == BOARD_I2C_BUS) {
++		interface = BMP388_I2C_interface(config.bus, config.i2c_address, config.bus_frequency);
++
++	} else
++#endif // CONFIG_I2C
++#if defined(CONFIG_SPI)
++		if (config.bus_type == BOARD_SPI_BUS) {
++			interface = BMP388_SPI_interface(config.bus, config.spi_devid, config.bus_frequency, config.spi_mode);
++		}
++
++#endif // CONFIG_SPI
++
++	if (interface == nullptr) {
++		PX4_ERR("alloc failed");
++		return nullptr;
++	}
++
++	if (interface->init() != OK) {
++		delete interface;
++		PX4_DEBUG("no device on bus %i", config.bus);
++		return nullptr;
++	}
++
++	BMP388 *dev = new BMP388(interface, config);
++
++	if (dev == nullptr) {
++		delete interface;
++		return nullptr;
++	}
++
++	if (dev->init() != OK) {
++		delete dev;
++		return nullptr;
++	}
++
++	return dev;
++}
++
+ void BMP388::print_usage()
+ {
+ 	PRINT_MODULE_USAGE_NAME("bmp388", "driver");
+ 	PRINT_MODULE_USAGE_SUBCATEGORY("baro");
+ 	PRINT_MODULE_USAGE_COMMAND("start");
+-	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(true, false);
++	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(true, true);
+ 	PRINT_MODULE_USAGE_PARAMS_I2C_ADDRESS(0x76);
+ 	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
+ }
+@@ -51,9 +95,14 @@ void BMP388::print_usage()
+ extern "C" int bmp388_main(int argc, char *argv[])
+ {
+ 	using ThisDriver = BMP388;
+-	BusCLIArguments cli{true, false};
++	BusCLIArguments cli{true, true};
++#if defined(CONFIG_I2C)
+ 	cli.i2c_address = 0x76;
+ 	cli.default_i2c_frequency = I2C_SPEED;
++#endif // CONFIG_I2C
++#if defined(CONFIG_SPI)
++	cli.default_spi_frequency = SPI_SPEED;
++#endif // CONFIG_SPI
+ 
+ 	const char *verb = cli.parseDefaultArguments(argc, argv);
+ 
+diff --git a/src/drivers/barometer/bmp388/bmp388_spi.cpp b/src/drivers/barometer/bmp388/bmp388_spi.cpp
+new file mode 100644
+index 0000000000..635df9244d
+--- /dev/null
++++ b/src/drivers/barometer/bmp388/bmp388_spi.cpp
+@@ -0,0 +1,109 @@
++/****************************************************************************
++ *
++ *   Copyright (c) 2019-2026 PX4 Development Team. All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in
++ *    the documentation and/or other materials provided with the
++ *    distribution.
++ * 3. Neither the name PX4 nor the names of its contributors may be
++ *    used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
++ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
++ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ *
++ ****************************************************************************/
++
++
++/**
++ * @file bmp388_spi.cpp
++ *
++ * SPI interface for the BMP388/BMP390.
++ *
++ * 4-wire SPI (BMP390 datasheet section 5.3): a read sends 0x80 | reg_addr and
++ * the part inserts ONE dummy byte before the first data byte; a write sends
++ * reg_addr with bit 7 clear followed by the data. The part auto-detects mode 0
++ * or mode 3 per transaction, so either works on real silicon -- the bus mode is
++ * left to the caller (-m on the command line).
++ */
++
++#include "bmp388.h"
++
++#include <lib/drivers/device/spi.h>
++
++#if defined(CONFIG_SPI)
++
++static constexpr uint8_t DIR_READ = (1 << 7);
++
++class BMP388_SPI : public device::SPI
++{
++public:
++	BMP388_SPI(int bus, uint32_t device, int bus_frequency, spi_mode_e spi_mode);
++	~BMP388_SPI() override = default;
++
++	int read(unsigned address, void *data, unsigned count) override;
++	int write(unsigned address, void *data, unsigned count) override;
++};
++
++device::Device *BMP388_SPI_interface(int bus, uint32_t devid, int bus_frequency, spi_mode_e spi_mode)
++{
++	return new BMP388_SPI(bus, devid, bus_frequency, spi_mode);
++}
++
++BMP388_SPI::BMP388_SPI(int bus, uint32_t device, int bus_frequency, spi_mode_e spi_mode) :
++	SPI(DRV_BARO_DEVTYPE_BMP388, MODULE_NAME, bus, device, spi_mode, bus_frequency)
++{
++}
++
++int BMP388_SPI::read(unsigned address, void *data, unsigned count)
++{
++	// command byte + one dummy byte the part inserts + the data
++	uint8_t buf[32];
++
++	if (sizeof(buf) < count + 2) {
++		return -EIO;
++	}
++
++	buf[0] = address | DIR_READ;
++
++	const int ret = transfer(&buf[0], &buf[0], count + 2);
++
++	if (ret == PX4_OK) {
++		memcpy(data, &buf[2], count);
++	}
++
++	return ret;
++}
++
++int BMP388_SPI::write(unsigned address, void *data, unsigned count)
++{
++	uint8_t buf[32];
++
++	if (sizeof(buf) < count + 1) {
++		return -EIO;
++	}
++
++	buf[0] = address & 0x7f;
++	memcpy(&buf[1], data, count);
++
++	return transfer(&buf[0], nullptr, count + 1);
++}
++
++#endif // CONFIG_SPI
+-- 
+2.50.1 (Apple Git-155)
+

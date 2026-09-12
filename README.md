@@ -1,19 +1,20 @@
-# rotanimb01 — a HITL flight bench for stock ArduPlane
+# rotanimb01 — a hardware-in-the-loop flight bench for stock ArduPlane and PX4
 
 One STM32G474 (the **harness**) impersonates a flight controller's whole
 sensor suite — BMI088 gyro+accel, BMP390 baro, RM3100 magnetometer — at
 the **SPI register level** on the DUT's own sensor bus, feeds DroneCAN
 GPS + airspeed, captures the DUT's eight servo PWM outputs, and runs a
-Kitfox V 6-DOF flight dynamics model at 1 kHz to close the loop. A stock
-ArduPlane build on a NucleoF767ZI (the **DUT**) boots against it, probes
-"real" sensors, calibrates, arms, takes off and flies — its real
-drivers, its real EKF3, its real control loops, none the wiser.
+6-DOF flight dynamics model (a Kitfox Model V light aircraft) at 1 kHz
+to close the loop. A stock ArduPlane or PX4 build on a NUCLEO-F767ZI
+(the **DUT**) boots against it, probes "real" sensors, calibrates, arms,
+takes off and flies — its real drivers, its real EKF, its real control
+loops, none the wiser.
 
-The same FDM also flies as an ArduPilot **SITL** backend on the
-workstation, so tuning campaigns run at 10x real time in pure software
-and are then validated through the emulated-sensor hardware path. As of
-the F5 checkride both rigs fly the owner-defined loiter legs
-identically to the meter (doc/F5-TESTREPORT-2026-07-15.md).
+The same FDM also flies as an ArduPilot **SITL** backend and as a PX4
+SITL simulator on the workstation, so tuning campaigns run at 10x real
+time in pure software and are then validated through the emulated-sensor
+hardware path. Both rigs fly the reference loiter legs identically to the
+meter (doc/F5-TESTREPORT-2026-07-15.md).
 
 ## The loop
 
@@ -21,7 +22,7 @@ identically to the meter (doc/F5-TESTREPORT-2026-07-15.md).
              ┌──────────────────── harness (G474) ────────────────────┐
              │                                                        │
              │   fdm.c 1 kHz ──► truth ──► sensor models (noise,     │
-             │   Kitfox V 6-DOF            quantization, bias walk)   │
+             │   6-DOF light aircraft      quantization, bias walk)   │
              │        ▲                     │            │            │
              │        │                 SPI slaves    FDCAN3          │
              │   controls.c             (regfiles)    DroneCAN        │
@@ -34,65 +35,95 @@ identically to the meter (doc/F5-TESTREPORT-2026-07-15.md).
                  servo PWM          SPI3 + 4xCS      CAN bus (1 Mbit)
                       │                   │ │            │
              ┌────────┴───────────────────┴─┴────────────┴────────────┐
-             │              DUT: stock ArduPlane, NucleoF767ZI        │
-             │        real drivers → EKF3 → TECS/L1 → servos          │
+             │       DUT: stock ArduPlane or PX4, NUCLEO-F767ZI       │
+             │       real drivers → EKF → TECS/L1 → servos            │
              └─────────────────────────────────────────────────────────┘
 ```
 
 Control/observability sidechannel: the harness's USB CDC speaks
-**pseudocan** (text-framed CAN, lib/fmtcan). Over it run the FDM
+**pseudocan** (text-framed CAN, nlib/fmtcan). Over it run the FDM
 commands (mode, air-start, wind, PWM cal, parameters) and the 20 Hz
 TRUTH_* telemetry. `rb01tool` is the interactive cockpit; `tools/bench`
 drives unattended missions.
 
+## What you need
+
+- **Harness**: an STM32G474RE — a 64-pin breakout as used here, or a
+  NUCLEO-G474RE (same pins; the console is on USART1 PA9/PA10, not the
+  Nucleo's own VCP). Flashed over SWD with openocd.
+- **DUT**: a NUCLEO-F767ZI. Board definitions for both autopilots ship
+  in `dut/` as patch series against upstream.
+- Two 5 V CAN transceivers (TJA1051 or similar) and a handful of jumper
+  wires; a USB hub with per-port power control (uhubctl) is a real
+  quality-of-life item, see doc/BENCH-OPERATIONS.md.
+- A host for the USB side: any Linux box (a Raspberry Pi works well) or
+  the workstation directly. Toolchains: arm-none-eabi-gcc 13+ for the
+  harness, Go 1.21+ for the tools, the autopilot's own toolchain for the
+  DUT.
+
+## Start here
+
+1. **doc/SETUP-ARDUPLANE.md** — wire it, build and flash the harness,
+   build stock ArduPlane for the DUT, first boot, fly the 1 km square.
+2. **doc/SETUP-PX4.md** — the same for PX4.
+3. **doc/BENCH-OPERATIONS.md** — the bring-up ladder and every trap the
+   bench has taught: RAM-only state, power-cycle discipline, engine
+   models, resets.
+4. **doc/FDM-TUNING.md** — the parameter table, the golden-check
+   workflow, and which observable pins which coefficient.
+5. **doc/TRUTH-TELEMETRY.md** — reading truth off the harness for your
+   own consumers.
+
 ## Directory map
 
-| dir          | what                                                                                       |
-| ------------ | ------------------------------------------------------------------------------------------ |
-| `src/`       | harness firmware (n-array app): SPI-slave engine users, sensor regfile models, PWM capture, FDCAN3 DroneCAN feeder, pseudocan command loop |
-| `fdm/`       | the 6-DOF model (`fdm.c`, freestanding float32+CORDIC) + host `golden` gates + `turncheck` + **`sitljson`** (the SITL backend wrapper) |
-| `physics/`   | mode-0 kinematic model (speed/climb/turn commands) + its golden                            |
-| `bmp390inv/` | BMP390 compensation inverter (truth pressure → raw counts for the emulated trim)           |
-| `rb01tool/`  | Go console cockpit: live PFD, single-key physics steering, DroneCAN GPS host feeder        |
-| `tools/bench/` | bench + SITL mission drivers (Go): param staging, departures, loiter legs, probes, autotune |
-| `doc/`       | all design docs and reports (below)                                                        |
+| dir              | what                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| `src/`           | harness firmware: SPI-slave engine users, sensor regfile models, PWM capture, FDCAN3 DroneCAN feeder, pseudocan command loop; `src/nlib/` is the bare-metal support library |
+| `fdm/`           | the 6-DOF model (`fdm.c`, freestanding float32+CORDIC) + host `golden` gates + `turncheck` + **`sitljson`** (the ArduPilot SITL backend wrapper) |
+| `physics/`       | mode-0 kinematic model (speed/climb/turn commands) + its golden                            |
+| `bmp390inv/`     | BMP390 compensation inverter (truth pressure → raw counts for the emulated trim)           |
+| `selftest/`      | the harness masters its own sensor bus and replays a real driver's init sequences (7 jumpers) |
+| `rb01tool/`      | Go console cockpit: live PFD, single-key physics steering, host-side DroneCAN GPS feeder   |
+| `tools/bench/`   | bench + SITL mission drivers (Go): param staging, departures, loiter legs, probes, autotune, harness `drive` commands, TCP↔serial bridge |
+| `tools/px4hil/`  | PX4 SITL simulator bridge around the same `fdm.c` (cgo)                                    |
+| `dut/ardupilot/` | patch series: the NucleoF767ZI hwdef + two bootloader fixes                                |
+| `dut/px4/`       | patch series: the st/nucleo-f767zi board, BMP388 SPI driver, airframe 2110                 |
+| `doc/`           | setup guides, design docs, the checkride report, the annotated DUT parameter file, example missions |
 
-## Documentation index
+## Design documentation
 
 - **doc/DESIGN.md** — the harness: topology (one SPI slave, 4 CS demux),
   the two deadlines, register models, CAN dictionary, pinout, milestones
   M0-M7 with bench-measured numbers.
-- **doc/fdm-DESIGN.md** — the FDM: Kitfox V aero tables, power-based
-  prop (owner's engine data), ground model (tricycle spec), servo lag,
-  integration ladder F0-F5.
-- **doc/REGMAPS.md** — the emulated register maps as ArduPilot's
+- **doc/fdm-DESIGN.md** — the FDM: aero tables, power-based prop, ground
+  model, servo lag, integration ladder F0-F5.
+- **doc/REGMAPS.md** — the emulated register maps as the autopilots'
   drivers actually exercise them.
 - **doc/F5-CHECKRIDE.md** — the acceptance rung definition.
 - **doc/F5-TESTREPORT-2026-07-15.md** — the multi-night checkride
   report: 17+ defects found and fixed (the point of HITL), transition
   matrix, tuning campaign, final PASS numbers.
-- **doc/f5-bench.parm** — the DUT parameter file, heavily annotated
-  with every ArduPilot trap the bench discovered.
+- **doc/f5-bench.parm** — the ArduPlane parameter file, heavily
+  annotated with every ArduPilot trap the bench discovered.
+- **src/canmsg.h** — the as-built pseudocan dictionary (commands in,
+  telemetry out).
 
 ## The two rigs
 
 ### HITL (the real bench)
 
-All four USB devices hang off a raspberry pi (`slon.local`):
-ArduPlane's MAVLink CDC, the harness pseudocan CDC, the harness ST-Link
-(console + flash), the Nucleo ST-Link. `tools/bench/` runs on the
-workstation and reaches the DUT through a TCP↔serial bridge on the pi
-(port 5760); harness commands go over ssh. `uhubctl` on the pi
-power-cycles individual ports — the cure for ArduPilot's watchdog
-latch, which survives soft resets in backup RAM.
+All USB devices — the DUT's MAVLink CDC, the harness pseudocan CDC, the
+two ST-Links — hang off one host. `tools/bench` runs on the workstation
+and reaches the DUT through `bench serbridge` on that host (TCP port
+5760); harness commands (`bench drive ...`) run on the host itself.
+`uhubctl` power-cycles individual hub ports — the cure for ArduPilot's
+watchdog latch, which survives soft resets in backup RAM.
 
-Wiring: DUT SPI3 (PB3/4/5) + CS PD3/4/5/6 → harness SPI3 + PC0-PC3;
-DUT PWM1-8 (PC6-9, PD12-15) → harness PA0/PA1/PB10/PB11 + PC6-9;
-DUT CAN1 PD0/PD1 ↔ harness FDCAN3 PB3/PB4 via TJA1051 transceivers
-(5 V supply — 3.3 V cannot drive the bus, LEC=Bit0 forever).
-The ArduPilot side is branch `nucleo-f767-hitl` in the ardupilot tree
-(hwdef + two bootloader fixes); build `./waf configure --board
-NucleoF767ZI && ./waf plane`.
+Wiring: DUT SPI3 (PB3/4/5) + CS PD3/4/5/6 → harness SPI3 (PC10/11/12)
++ PC0-PC3; DUT PWM1-8 (PC6-9, PD12-15) → harness PA0/PA1/PB10/PB11 +
+PC6-9; DUT CAN1 PD0/PD1 ↔ harness FDCAN3 PB3/PB4 via TJA1051
+transceivers (5 V supply — 3.3 V cannot drive the bus, LEC=Bit0
+forever). Full table in doc/SETUP-ARDUPLANE.md.
 
 ### SITL (the software rig)
 
@@ -111,12 +142,13 @@ arduplane --model JSON:127.0.0.1 --speedup 10 --home 52.0,5.1,0,0 -w &
 Then drive it with `tools/bench` exactly like the real bench (same
 tool, different address). Tune fast in SITL, validate through the
 sensor path on hardware. See tools/bench/README.md for the campaign
-tools and the session procedures.
+tools and the session procedures. `tools/px4hil` is the PX4
+equivalent (simulator-MAVLink over TCP :4560).
 
 ## Hard-won operational truths (the short list)
 
-The long list is doc/F5-TESTREPORT-2026-07-15.md and the parm file
-comments. The ones that cost the most:
+The long list is doc/BENCH-OPERATIONS.md, doc/F5-TESTREPORT-2026-07-15.md
+and the parm file comments. The ones that cost the most:
 
 - **The harness PWM cal is RAM-only.** Any harness reboot reverts to
   the all-positive default = inverted elevator for ArduPilot. Resend
@@ -134,3 +166,12 @@ comments. The ones that cost the most:
 - After a watchdog event, power-cycle before expecting baro cal;
   after reflashing the harness mid-session, power-cycle the DUT (its
   main loop stalls on the dead SPI bus and trips that watchdog).
+- **The default engine model is a naturally aspirated 100 hp Rotax
+  912.** It cannot hold altitude above ~14,000 ft. High-altitude work
+  needs `bench drive engine 915` (turbo), which is RAM-only too.
+
+## Licence
+
+MIT, see LICENSE. The autopilot patch series in `dut/` are contributions
+to ArduPilot and PX4 and carry those projects' licences (GPLv3 and
+BSD-3-Clause respectively).

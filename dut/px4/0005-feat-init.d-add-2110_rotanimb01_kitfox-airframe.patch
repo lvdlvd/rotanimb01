@@ -1,0 +1,159 @@
+From 4b39aba1f4889017c3884c10db9c99b9d4702690 Mon Sep 17 00:00:00 2001
+From: Luuk van Dijk <lvd@mndmttr.net>
+Date: Tue, 1 Sep 2026 07:04:00 +0200
+Subject: [PATCH] feat(init.d): add 2110_rotanimb01_kitfox airframe
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Standard-plane NuttX airframe for a Kitfox-class light aircraft on
+the st/nucleo-f767zi board flying against a register-level HIL
+sensor harness. Notable, each with its reasoning in the file:
+FW_LND_USETER=0 (no rangefinder or terrain source aboard — with the
+default 1, FW_LND_ABORT's terrain criteria abort every landing into
+an indefinite loiter), UAVCAN_SUB_DPRES=1 (the airspeed sensor
+publishes RawAirData differential pressure, not TrueAirspeed),
+ASPD_DO_CHECKS=0 (documented deviation: the checks latch on the
+takeoff transient of this airframe and TECS then overspeeds),
+SENS_BOARD/CAL rotations for the harness's BMI088 orientation, and
+PWM functions in the harness's servo order (ail/ele/thr/rud).
+---
+ .../init.d/airframes/2110_rotanimb01_kitfox   | 113 ++++++++++++++++++
+ .../init.d/airframes/CMakeLists.txt           |   1 +
+ 2 files changed, 114 insertions(+)
+ create mode 100644 ROMFS/px4fmu_common/init.d/airframes/2110_rotanimb01_kitfox
+
+diff --git a/ROMFS/px4fmu_common/init.d/airframes/2110_rotanimb01_kitfox b/ROMFS/px4fmu_common/init.d/airframes/2110_rotanimb01_kitfox
+new file mode 100644
+index 0000000000..184dd9601a
+--- /dev/null
++++ b/ROMFS/px4fmu_common/init.d/airframes/2110_rotanimb01_kitfox
+@@ -0,0 +1,113 @@
++#!/bin/sh
++#
++# @name Kitfox V (rotanimb01 HITL bench)
++#
++# @type Standard Plane
++# @class Plane
++#
++# Kitfox Series 5 as flown on the rotanimb01 hardware-in-the-loop bench: a
++# STM32G474 harness impersonates the whole sensor suite at the SPI register
++# level, feeds DroneCAN GPS and airspeed, captures these eight PWM outputs and
++# runs the same 6-DOF fdm.c the ArduPlane side of the bench flies. The numbers
++# below are that model's, so the two autopilots fly identical physics.
++#
++# Model reference values (rotanimb01 fdm_defaults, doc/fdm-DESIGN.md mode 1):
++# - mass 480 kg, wing 12.2 m2 / 9.75 m span / 1.25 m chord
++# - stall alpha 15 deg -> Vs ~20 m/s CAS; trim/cruise 30 m/s
++# - Rotax 912iS 100 hp, static thrust 1600 N
++#
++# @board px4_fmu-v2 exclude
++#
++
++. ${R}etc/init.d/rc.fw_defaults
++
++# Control allocation: single aileron + elevator + rudder surface and one
++# tractor motor.
++param set-default CA_ROTOR_COUNT 1
++param set-default CA_ROTOR0_PX 1.0
++param set-default CA_SV_CS_COUNT 3
++param set-default CA_SV_CS0_TRQ_R 1
++param set-default CA_SV_CS0_TYPE 15
++param set-default CA_SV_CS1_TRQ_P 1
++param set-default CA_SV_CS1_TYPE 3
++param set-default CA_SV_CS2_TRQ_Y 1
++param set-default CA_SV_CS2_TYPE 4
++
++# Output map. THE ORDER IS THE HARNESS'S, NOT THE SITL BRIDGE'S: the bench
++# captures PWM1-4 as aileron, elevator, THROTTLE, rudder (rotanimb01
++# controls.h, `enum { CTL_AIL, CTL_ELE, CTL_THR, CTL_RUD }`) because that is
++# ArduPlane's default servo assignment and the harness was built against it.
++# The px4hil SITL airframe uses 0=ail 1=ele 2=rud 3=thr instead -- do not copy
++# one to the other.
++param set-default PWM_MAIN_FUNC1 201
++param set-default PWM_MAIN_FUNC2 202
++param set-default PWM_MAIN_FUNC3 101
++param set-default PWM_MAIN_FUNC4 203
++
++# Airspeeds from the fdm table (m/s CAS)
++param set-default FW_AIRSPD_STALL 20.0
++param set-default FW_AIRSPD_MIN 24.0
++param set-default FW_AIRSPD_TRIM 30.0
++param set-default FW_AIRSPD_MAX 45.0
++
++# TECS envelope: ~730 N excess thrust at 30 m/s -> ~4.5 m/s climb
++param set-default FW_T_CLMB_MAX 4.5
++param set-default FW_T_SINK_MIN 1.0
++param set-default FW_T_SINK_MAX 3.0
++param set-default FW_THR_TRIM 0.45
++param set-default FW_THR_MIN 0.05
++
++# Geometry / mass
++param set-default FW_WING_SPAN 9.75
++param set-default FW_WING_HEIGHT 2.0
++param set-default WEIGHT_BASE 480.0
++param set-default WEIGHT_GROSS 480.0
++
++# Ground start at the bench anchor: runway takeoff, no launch detection
++param set-default RWTO_TKOFF 1
++param set-default MIS_TAKEOFF_ALT 100.0
++
++# Kitfox-comfortable turns: <=30 deg bank at 30 m/s -> >=160 m radius
++param set-default NAV_LOITER_RAD 200.0
++param set-default FW_R_LIM 35.0
++
++# Sensors arrive over DroneCAN from the harness node on CAN1: GPS (Fix2) and
++# airspeed (RawAirData). UAVCAN_ENABLE 2 brings up the sensor bridges.
++param set-default UAVCAN_ENABLE 2
++param set-default UAVCAN_BITRATE 1000000
++# The harness sends uavcan::equipment::air_data::RawAirData, which is the
++# DIFFERENTIAL PRESSURE bridge (not the airspeed bridge, which wants
++# TrueAirspeed + StaticTemperature). UAVCAN_SUB_DPRES defaults to 0, so
++# without this there is no airspeed at all and preflight fails on it.
++param set-default UAVCAN_SUB_DPRES 1
++
++# DEVIATION, bench-specific: the in-flight airspeed consistency checks are OFF.
++# They trip during the takeoff transient and then LATCH for the rest of the
++# flight (airspeed_source goes to -1 and ASPD_FS_T_STOP never re-enables it),
++# after which TECS flies on the synthetic estimate and the aircraft cruises at
++# ~39 m/s instead of the commanded 30. With the checks off the same flight
++# holds IAS 29.70 against a 30.0 trim and EKF2 fuses airspeed (cs_fuse_aspd).
++# The checks exist to catch a blocked pitot; on this bench the "pitot" is
++# synthesised from the same fdm truth as the GPS, so there is no independent
++# failure for them to catch. WHICH of the three checks trips, and why, is NOT
++# established -- if this board ever drives real hardware, restore the default.
++param set-default ASPD_DO_CHECKS 0
++
++# There is NO RANGEFINDER on this aircraft (nor does the harness emulate one,
++# and EKF2_RANGE_FINDER is not built into this board). FW_LND_USETER defaults
++# to 1 = use the terrain estimate to trigger the flare, and when no terrain
++# measurement turns up the fixed-wing controller raises abort_status
++# TERRAIN_NOT_FOUND, whereupon the navigator converts the landing waypoint
++# into an indefinite loiter -- "Holding at N m above landing waypoint" -- and
++# the mission never finishes. 0 flares on the landing waypoint's altitude
++# instead, and makes FW_LND_ABORT's terrain criteria moot. Restore the default
++# if a rangefinder is ever fitted.
++param set-default FW_LND_USETER 0
++
++# Aux-position slot: EKF2 constructs an AGP source only when the ID param
++# is nonzero AT BOOT (aux_global_position.cpp ctor), so wire slot 0 to sensor
++# id 1 here. Inert unless something publishes aux_global_position (an
++# external navigator, SOURCE_VISION); with samples it carries the position
++# estimate through GPS loss.
++param set-default EKF2_AGP0_ID 1
++param set-default EKF2_AGP0_CTRL 1
+diff --git a/ROMFS/px4fmu_common/init.d/airframes/CMakeLists.txt b/ROMFS/px4fmu_common/init.d/airframes/CMakeLists.txt
+index 0595abe4a7..df16294841 100644
+--- a/ROMFS/px4fmu_common/init.d/airframes/CMakeLists.txt
++++ b/ROMFS/px4fmu_common/init.d/airframes/CMakeLists.txt
+@@ -115,6 +115,7 @@ if(CONFIG_MODULES_FW_RATE_CONTROL)
+ 		# [2000, 2999] Standard planes
+ 		2100_standard_plane
+ 		2106_albatross
++		2110_rotanimb01_kitfox
+ 
+ 		# [3000, 3999] Flying wing
+ 		3000_generic_wing
+-- 
+2.50.1 (Apple Git-155)
+

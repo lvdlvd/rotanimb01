@@ -1,0 +1,27 @@
+From 7896fb184a7c6b8be8113cb12fa31b6c6589fa22 Mon Sep 17 00:00:00 2001
+From: Luuk van Dijk <lvd@mndmttr.net>
+Date: Tue, 1 Sep 2026 07:03:47 +0200
+Subject: [PATCH] fix(uavcan): add battery to module DEPENDS
+
+sensors/battery.cpp uses lib/battery; on configs without the
+battery_status module, nothing else pulls the library in and the
+link fails with undefined references.
+---
+ src/drivers/uavcan/CMakeLists.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/drivers/uavcan/CMakeLists.txt b/src/drivers/uavcan/CMakeLists.txt
+index dba4f64777..b2464f5f6e 100644
+--- a/src/drivers/uavcan/CMakeLists.txt
++++ b/src/drivers/uavcan/CMakeLists.txt
+@@ -200,6 +200,7 @@ px4_add_module(
+ 		uavcan_${UAVCAN_DRIVER}_driver
+ 
+ 		drivers_rangefinder # Fix undefined reference when no distance sensors are selected
++		battery # sensors/battery.cpp uses lib/battery, which battery_status would otherwise be the only one to pull in
+ 
+ 		# within libuavcan
+ 		uavcan
+-- 
+2.50.1 (Apple Git-155)
+

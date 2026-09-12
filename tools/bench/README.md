@@ -66,9 +66,9 @@ sockets on macOS). Device defaults for `drive`/`serbridge`/`usbreset`:
 - **watch** streams mode, altitude, climb, IAS, throttle, pitch, roll,
   altitude and speed error once a second. Passive.
 - **drive** sends harness commands (pseudocan) and tails the harness
-  console for the readback; reference in doc/BENCH-OPERATIONS.md.
+  console for the readback; reference in [doc/BENCH-OPERATIONS.md](../../doc/BENCH-OPERATIONS.md).
 - **usbreset** re-enumerates a wedged CDC device without resetting the
-  firmware (USBDEVFS_RESET; doc/BENCH-OPERATIONS.md).
+  firmware (USBDEVFS_RESET; [doc/BENCH-OPERATIONS.md](../../doc/BENCH-OPERATIONS.md)).
 
 ## HDGALT: an experimental ArduPlane mode (not needed for anything here)
 

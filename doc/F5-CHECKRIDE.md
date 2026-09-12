@@ -1,6 +1,6 @@
 # F5 checkride — stock ArduPlane (NucleoF767ZI) vs the harness
 
-The acceptance rung from fdm-DESIGN.md: EKF healthy, FBWA hands-off,
+The acceptance rung from [fdm-DESIGN.md](fdm-DESIGN.md): EKF healthy, FBWA hands-off,
 LOITER in wind, TECS climb — flown entirely on the bench.
 
 ## Wiring (F767 → harness)

@@ -184,7 +184,7 @@ bench drive gps <0|1> [lag_ms]                  DroneCAN feeder on/off, lag
 bench drive wind <n_mps> <e_mps> [gust_cms] [tau_s]
 bench drive engine <912|915>                    engine preset (PARAM 41-43)
 bench drive cal [ardupilot|px4]                 PWM sign profile — RAM-only
-bench drive param <index> <value>               any FDM parameter (FDM-TUNING.md)
+bench drive param <index> <value>               any FDM parameter ([FDM-TUNING.md](FDM-TUNING.md))
 bench drive tail [secs]                         harness console tail
 ```
 

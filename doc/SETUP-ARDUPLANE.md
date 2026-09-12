@@ -1,8 +1,8 @@
 # Setup: stock ArduPlane on the bench
 
 End to end, for someone with a NUCLEO-F767ZI, an STM32G474 board and the
-parts in README.md. Every step names what "done" looks like. The traps
-you will hit along the way are catalogued in BENCH-OPERATIONS.md — read
+parts in [README.md](../README.md). Every step names what "done" looks like. The traps
+you will hit along the way are catalogued in [BENCH-OPERATIONS.md](BENCH-OPERATIONS.md) — read
 its first section before powering anything.
 
 ## 1. Wire it
@@ -246,11 +246,11 @@ cross-checks yaw vs GPS course vs EKF velocity vs airspeed.
 ## 8. Truth vs EKF
 
 The harness reports the model's truth at 20 Hz over pseudocan
-(TRUTH-TELEMETRY.md). `rb01tool` shows it as a PFD next to the model
+([TRUTH-TELEMETRY.md](TRUTH-TELEMETRY.md)). `rb01tool` shows it as a PFD next to the model
 state; ArduPilot's ATTITUDE / GLOBAL_POSITION_INT from MAVProxy is the
 estimate. The two are independent paths through independent hardware:
 on a healthy bench they agree to a degree in attitude and metres in
-position (the checkride numbers are in F5-TESTREPORT-2026-07-15.md,
+position (the checkride numbers are in [F5-TESTREPORT-2026-07-15.md](F5-TESTREPORT-2026-07-15.md),
 night 7). Do not use the DroneCAN GPS feed as truth — it is the
 deliberately lagged, quantized feed the DUT consumes.
 
@@ -266,4 +266,4 @@ bench fly
 ```
 
 Tune in SITL, then validate through the sensor path on the bench.
-tools/bench/README.md has the campaign tools and the session checklist.
+[tools/bench/README.md](../tools/bench/README.md) has the campaign tools and the session checklist.

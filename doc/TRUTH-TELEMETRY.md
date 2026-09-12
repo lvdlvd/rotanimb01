@@ -75,4 +75,4 @@ quaternion to Euler on the host (rb01tool's `fromQuat`), align by host
 arrival time, and remember the estimator is allowed the GPS lag plus
 its own. On the healthy checkride bench the EKF roll tracked truth roll
 with r = 1.000 and no measurable lag — a truth-vs-estimate divergence
-is a finding, not noise (F5-TESTREPORT-2026-07-15.md, night 7).
+is a finding, not noise ([F5-TESTREPORT-2026-07-15.md](F5-TESTREPORT-2026-07-15.md), night 7).

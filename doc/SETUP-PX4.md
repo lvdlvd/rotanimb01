@@ -1,6 +1,6 @@
 # Setup: PX4 on the bench
 
-The same harness, wiring and host tools as SETUP-ARDUPLANE.md; only the
+The same harness, wiring and host tools as [SETUP-ARDUPLANE.md](SETUP-ARDUPLANE.md); only the
 DUT firmware and a few procedures differ. Read sections 1, 2, 4 of that
 guide first. PX4 flew a full GPS mission on this bench (takeoff, a 1 km
 square at 150 m, landing) with all sensors emulated.
@@ -31,7 +31,7 @@ Build size ~1.35 MB of the 1792 KB application region.
 There is **no PX4 bootloader** on this board: the image goes straight
 to 0x08000000 over SWD. Consequence: flashing PX4 erases the ArduPilot
 bootloader; going back to ArduPlane means re-flashing that bootloader
-too (SETUP-ARDUPLANE.md section 3), not `--upload`.
+too ([SETUP-ARDUPLANE.md](SETUP-ARDUPLANE.md) section 3), not `--upload`.
 
 ```
 openocd -f interface/stlink.cfg \
@@ -133,7 +133,7 @@ to PX4_WARN on the console. Worked example: "Mission start denied! No
 valid mission" was `MIS_TKO_LAND_REQ 2` (rc.fw_defaults requires a
 landing item) — invisible from the GCS side.
 
-Truth for comparison: TRUTH-TELEMETRY.md; PX4's estimate from
+Truth for comparison: [TRUTH-TELEMETRY.md](TRUTH-TELEMETRY.md); PX4's estimate from
 `listener vehicle_local_position` / `vehicle_attitude` or the MAVLink
 stream.
 

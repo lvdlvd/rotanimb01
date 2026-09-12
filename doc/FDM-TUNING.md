@@ -3,7 +3,7 @@
 The model is `fdm/fdm.c`: freestanding float32, 1 kHz on the harness,
 the same source in every host build (golden tests, ArduPilot SITL
 backend, PX4 SITL bridge). Design rationale and the equations are in
-fdm-DESIGN.md; this document is the how-to.
+[fdm-DESIGN.md](fdm-DESIGN.md); this document is the how-to.
 
 Two ways to change it, in order of preference:
 
@@ -79,7 +79,7 @@ make -C src               # the F1 gate: fdm.o must stay float32-only (no soft d
 make -C src flash
 ```
 
-`fdm/golden.c` is the validation ladder from fdm-DESIGN.md as code. What
+`fdm/golden.c` is the validation ladder from [fdm-DESIGN.md](fdm-DESIGN.md) as code. What
 it prints, and the acceptance bands it enforces:
 
 - ISA table vs the closed form; trim solver converges across the

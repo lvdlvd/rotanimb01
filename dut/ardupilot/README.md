@@ -29,6 +29,6 @@ git am /path/to/rotanimb01/dut/ardupilot/*.patch
 ./waf configure --board NucleoF767ZI && ./waf plane
 ```
 
-Flashing and first boot: doc/SETUP-ARDUPLANE.md. Runtime parameters
+Flashing and first boot: [doc/SETUP-ARDUPLANE.md](../../doc/SETUP-ARDUPLANE.md). Runtime parameters
 the board expects: `doc/f5-bench.parm` (CAN_P1_DRIVER 1, GPS1_TYPE 9,
 ARSPD_TYPE 8, and the rest).

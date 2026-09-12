@@ -16,7 +16,7 @@ The same FDM also flies as an ArduPilot Software-In-The-Loop (**SITL**)
 backend and as a PX4 SITL simulator on the workstation, so tuning
 campaigns run at 10x real time in pure software and are then validated
 through the emulated-sensor hardware path. Both rigs fly the reference
-loiter legs identically to the meter (doc/F5-TESTREPORT-2026-07-15.md).
+loiter legs identically to the meter ([doc/F5-TESTREPORT-2026-07-15.md](doc/F5-TESTREPORT-2026-07-15.md)).
 
 ## The loop
 
@@ -76,13 +76,13 @@ two CAN transceivers and jumper wires.](doc/hitl-small.jpg)](doc/hitl.png)
   whose VCP (virtual COM port, a USB serial) is
   wired to USART1 PA9/PA10 as the console. That is the board this was
   developed and tested on. A NUCLEO-G474RE has the same microcontroller and pins
-  but was not tested; doc/SETUP-ARDUPLANE.md section 1 lists what
+  but was not tested; [doc/SETUP-ARDUPLANE.md](doc/SETUP-ARDUPLANE.md) section 1 lists what
   would differ. Flashed over SWD with openocd.
 - **DUT**: a NUCLEO-F767ZI. Board definitions for both autopilots ship
   in `dut/` as patch series against upstream.
 - Two 5 V CAN transceivers (TJA1051 or similar) and a handful of jumper
   wires; a USB hub with per-port power control (uhubctl) is a real
-  quality-of-life item, see doc/BENCH-OPERATIONS.md.
+  quality-of-life item, see [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md).
 - A host for the USB side: any Linux box (a Raspberry Pi works well) or
   the workstation directly. Toolchains: arm-none-eabi-gcc 15.2 for the
   harness (what it is built and tested with; `-std=gnu23`), Go 1.21+ for
@@ -92,15 +92,15 @@ two CAN transceivers and jumper wires.](doc/hitl-small.jpg)](doc/hitl.png)
 
 ## Start here
 
-1. **doc/SETUP-ARDUPLANE.md** — wire it, build and flash the harness,
+1. **[doc/SETUP-ARDUPLANE.md](doc/SETUP-ARDUPLANE.md)** — wire it, build and flash the harness,
    build stock ArduPlane for the DUT, first boot, fly the 1 km square.
-2. **doc/SETUP-PX4.md** — the same for PX4.
-3. **doc/BENCH-OPERATIONS.md** — the bring-up ladder and every trap the
+2. **[doc/SETUP-PX4.md](doc/SETUP-PX4.md)** — the same for PX4.
+3. **[doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md)** — the bring-up ladder and every trap the
    bench has taught: RAM-only state, power-cycle discipline, engine
    models, resets.
-4. **doc/FDM-TUNING.md** — the parameter table, the golden-check
+4. **[doc/FDM-TUNING.md](doc/FDM-TUNING.md)** — the parameter table, the golden-check
    workflow, and which observable pins which coefficient.
-5. **doc/TRUTH-TELEMETRY.md** — reading truth off the harness for your
+5. **[doc/TRUTH-TELEMETRY.md](doc/TRUTH-TELEMETRY.md)** — reading truth off the harness for your
    own consumers.
 
 ## Directory map
@@ -121,15 +121,15 @@ two CAN transceivers and jumper wires.](doc/hitl-small.jpg)](doc/hitl.png)
 
 ## Design documentation
 
-- **doc/DESIGN.md** — the harness: topology (one SPI slave, 4 CS demux),
+- **[doc/DESIGN.md](doc/DESIGN.md)** — the harness: topology (one SPI slave, 4 CS demux),
   the two deadlines, register models, CAN dictionary, pinout, milestones
   M0-M7 with bench-measured numbers.
-- **doc/fdm-DESIGN.md** — the FDM: aero tables, power-based prop, ground
+- **[doc/fdm-DESIGN.md](doc/fdm-DESIGN.md)** — the FDM: aero tables, power-based prop, ground
   model, servo lag, integration ladder F0-F5.
-- **doc/REGMAPS.md** — the emulated register maps as the autopilots'
+- **[doc/REGMAPS.md](doc/REGMAPS.md)** — the emulated register maps as the autopilots'
   drivers actually exercise them.
-- **doc/F5-CHECKRIDE.md** — the acceptance rung definition.
-- **doc/F5-TESTREPORT-2026-07-15.md** — the multi-night checkride
+- **[doc/F5-CHECKRIDE.md](doc/F5-CHECKRIDE.md)** — the acceptance rung definition.
+- **[doc/F5-TESTREPORT-2026-07-15.md](doc/F5-TESTREPORT-2026-07-15.md)** — the multi-night checkride
   report: 17+ defects found and fixed (the point of HITL), transition
   matrix, tuning campaign, final PASS numbers.
 - **doc/f5-bench.parm** — the ArduPlane parameter file, heavily
@@ -152,7 +152,7 @@ Wiring: DUT SPI3 (PB3/4/5) + CS PD3/4/5/6 → harness SPI3 (PC10/11/12)
 + PC0-PC3; DUT PWM1-8 (PC6-9, PD12-15) → harness PA0/PA1/PB10/PB11 +
 PC6-9; DUT CAN1 PD0/PD1 ↔ harness FDCAN3 PB3/PB4 via TJA1051
 transceivers (5 V supply — 3.3 V cannot drive the bus, the CAN last-error code reads Bit0
-forever). Full table in doc/SETUP-ARDUPLANE.md.
+forever). Full table in [doc/SETUP-ARDUPLANE.md](doc/SETUP-ARDUPLANE.md).
 
 ### SITL (the software rig)
 
@@ -170,13 +170,13 @@ arduplane --model JSON:127.0.0.1 --speedup 10 --home 52.0,5.1,0,0 -w &
 
 Then drive it with `tools/bench` exactly like the real bench (same
 tool, different address). Tune fast in SITL, validate through the
-sensor path on hardware. See tools/bench/README.md for the campaign
+sensor path on hardware. See [tools/bench/README.md](tools/bench/README.md) for the campaign
 tools and the session procedures. `tools/px4hil` is the PX4
 equivalent (simulator-MAVLink over TCP :4560).
 
 ## Hard-won operational truths (the short list)
 
-The long list is doc/BENCH-OPERATIONS.md, doc/F5-TESTREPORT-2026-07-15.md
+The long list is [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md), [doc/F5-TESTREPORT-2026-07-15.md](doc/F5-TESTREPORT-2026-07-15.md)
 and the parm file comments. The ones that cost the most:
 
 - **The harness PWM cal is RAM-only.** Any harness reboot reverts to
@@ -207,18 +207,18 @@ and the parm file comments. The ones that cost the most:
   ArduPlane boot-loops on the corrupt inertial-sensor replies. Detector: the
   counters (healthy = 0, always). Cure: reset the harness, confirm the
   counters return to 0, then boot the DUT. What shifts the command byte
-  has not been found; see doc/BENCH-OPERATIONS.md.
+  has not been found; see [doc/BENCH-OPERATIONS.md](doc/BENCH-OPERATIONS.md).
 - **CMD_NOISE (0x42) is accepted but not implemented.** The harness stores
   the frame and never reads it: the sensor noise and gyro bias walk are
   compiled-in constants (src/main.c, `noise()`), with no runtime mask or
   level control. The dictionary entry is reserved for that.
 - The spiral mode over-converges and the short period is overdamped
-  with the default coefficients (doc/FDM-TUNING.md has the knobs).
+  with the default coefficients ([doc/FDM-TUNING.md](doc/FDM-TUNING.md) has the knobs).
 - tools/bench also speaks an experimental ArduPlane mode (HDGALT,
   `bench mode hdgalt` / `bench hdgaltcmd`) that exists only in a public
   fork, branch `hdgaltmode` of https://github.com/lvdlvd/ardupilot, with
   zero warranties. Nothing in this repository needs it; on stock
-  ArduPlane those two commands are rejected. See tools/bench/README.md.
+  ArduPlane those two commands are rejected. See [tools/bench/README.md](tools/bench/README.md).
 - Bootloader builds in ArduPilot share the board's build directory with
   the application build; build the bootloader from a clean
   `build/NucleoF767ZI` or the generated DroneCAN headers go missing.

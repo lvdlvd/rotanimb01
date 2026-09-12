@@ -28,10 +28,10 @@ needs, two are the board itself.
    bench-specific deviations (`ASPD_DO_CHECKS 0`, `FW_LND_USETER 0`).
 
 `sitl/0001-*.patch` is separate: the `5100_px4hil_kitfox` POSIX SITL
-airframe for `tools/px4hil` (doc/SETUP-PX4.md section 7). Its output
+airframe for `tools/px4hil` ([doc/SETUP-PX4.md](../../doc/SETUP-PX4.md) section 7). Its output
 map is the bridge's (0 ail, 1 ele, 2 rud, 3 thr), not the board's.
 
-Apply and build (gcc 10 toolchain — see doc/SETUP-PX4.md):
+Apply and build (gcc 10 toolchain — see [doc/SETUP-PX4.md](../../doc/SETUP-PX4.md)):
 
 ```
 git checkout 7c4bf078f4

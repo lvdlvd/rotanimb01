@@ -1,20 +1,22 @@
-# rotanimb01 — a hardware-in-the-loop flight bench for stock ArduPlane and PX4
+# rotanimb01 — a hardware-in-the-loop (HITL) flight bench for stock ArduPlane and PX4
 
 One STM32G474 (the **harness**) impersonates a flight controller's whole
 sensor suite — BMI088 gyro+accel, BMP390 baro, RM3100 magnetometer — at
-the **SPI register level** on the DUT's own sensor bus, feeds DroneCAN
-GPS + airspeed, captures the DUT's eight servo PWM outputs, and runs a
-6-DOF flight dynamics model (a Kitfox Model V light aircraft) at 1 kHz
-to close the loop. A stock ArduPlane or PX4 build on a NUCLEO-F767ZI
-(the **DUT**) boots against it, probes "real" sensors, calibrates, arms,
-takes off and flies — its real drivers, its real EKF, its real control
-loops, none the wiser.
+the register level of the **SPI** (Serial Peripheral Interface) bus of
+the device under test (the **DUT**), feeds it GPS and airspeed over
+DroneCAN, captures its eight servo PWM (pulse-width modulation) outputs,
+and runs a six-degree-of-freedom Flight Dynamics Model (**FDM**) of a
+Kitfox Model V light aircraft at 1 kHz to close the loop. A stock
+ArduPlane or PX4 build on a NUCLEO-F767ZI (the DUT) boots against it,
+probes "real" sensors, calibrates, arms, takes off and flies — its real
+drivers, its real Extended Kalman Filter (EKF), its real control loops,
+none the wiser.
 
-The same FDM also flies as an ArduPilot **SITL** backend and as a PX4
-SITL simulator on the workstation, so tuning campaigns run at 10x real
-time in pure software and are then validated through the emulated-sensor
-hardware path. Both rigs fly the reference loiter legs identically to the
-meter (doc/F5-TESTREPORT-2026-07-15.md).
+The same FDM also flies as an ArduPilot Software-In-The-Loop (**SITL**)
+backend and as a PX4 SITL simulator on the workstation, so tuning
+campaigns run at 10x real time in pure software and are then validated
+through the emulated-sensor hardware path. Both rigs fly the reference
+loiter legs identically to the meter (doc/F5-TESTREPORT-2026-07-15.md).
 
 ## The loop
 
@@ -40,19 +42,23 @@ meter (doc/F5-TESTREPORT-2026-07-15.md).
              └─────────────────────────────────────────────────────────┘
 ```
 
-Control/observability sidechannel: the harness's USB CDC speaks
-**pseudocan** (text-framed CAN, nlib/fmtcan). Over it run the FDM
-commands (mode, air-start, wind, PWM cal, parameters) and the 20 Hz
-TRUTH_* telemetry. `rb01tool` is the interactive cockpit; `tools/bench`
-drives unattended missions.
+In the diagram, TECS and L1 are ArduPlane's energy (speed/height) and
+lateral navigation controllers, and CS the four SPI chip-select lines.
+
+Control/observability sidechannel: the harness's USB CDC (a virtual
+serial port) speaks **pseudocan** (text-framed CAN, nlib/fmtcan). Over
+it run the FDM commands (mode, air-start, wind, PWM cal, parameters)
+and the 20 Hz TRUTH_* telemetry. `rb01tool` is the interactive cockpit;
+`tools/bench` drives unattended missions.
 
 ## What you need
 
 - **Harness**: a cheap generic 64-pin STM32G474RET6 breakout board
   (the kind sold online for a few euros: LED on PC13 active-low, USB
-  connector on PA11/PA12, SWD header) plus an ST-Link whose VCP is
+  connector on PA11/PA12, SWD debug header) plus an ST-Link debug probe
+  whose VCP (virtual COM port, a USB serial) is
   wired to USART1 PA9/PA10 as the console. That is the board this was
-  developed and tested on. A NUCLEO-G474RE has the same MCU and pins
+  developed and tested on. A NUCLEO-G474RE has the same microcontroller and pins
   but was not tested; doc/SETUP-ARDUPLANE.md section 1 lists what
   would differ. Flashed over SWD with openocd.
 - **DUT**: a NUCLEO-F767ZI. Board definitions for both autopilots ship
@@ -89,7 +95,7 @@ drives unattended missions.
 | `physics/`       | mode-0 kinematic model (speed/climb/turn commands) + its golden                            |
 | `bmp390inv/`     | BMP390 compensation inverter (truth pressure → raw counts for the emulated trim)           |
 | `selftest/`      | the harness masters its own sensor bus and replays a real driver's init sequences (7 jumpers) |
-| `rb01tool/`      | Go console cockpit: live PFD, single-key physics steering, host-side DroneCAN GPS feeder   |
+| `rb01tool/`      | Go console cockpit: live primary flight display (PFD), single-key physics steering, host-side DroneCAN GPS feeder   |
 | `tools/bench/`   | bench + SITL mission drivers (Go): param staging, departures, loiter legs, probes, autotune, harness `drive` commands, TCP↔serial bridge |
 | `tools/px4hil/`  | PX4 SITL simulator bridge around the same `fdm.c` (cgo)                                    |
 | `dut/ardupilot/` | patch series: the NucleoF767ZI hwdef + two bootloader fixes                                |
@@ -128,7 +134,7 @@ watchdog latch, which survives soft resets in backup RAM.
 Wiring: DUT SPI3 (PB3/4/5) + CS PD3/4/5/6 → harness SPI3 (PC10/11/12)
 + PC0-PC3; DUT PWM1-8 (PC6-9, PD12-15) → harness PA0/PA1/PB10/PB11 +
 PC6-9; DUT CAN1 PD0/PD1 ↔ harness FDCAN3 PB3/PB4 via TJA1051
-transceivers (5 V supply — 3.3 V cannot drive the bus, LEC=Bit0
+transceivers (5 V supply — 3.3 V cannot drive the bus, the CAN last-error code reads Bit0
 forever). Full table in doc/SETUP-ARDUPLANE.md.
 
 ### SITL (the software rig)
@@ -164,7 +170,7 @@ and the parm file comments. The ones that cost the most:
   DUT reboot silently reverts them. `param_set` them explicitly and
   verify by readback at session start (`bench params` does).
 - **ARSPD_RATIO 1.6327** (= 2/rho0): the harness diff pressure is
-  exactly 0.5·rho0·IAS²; ArduPilot's 2.0 default reads 10.7% high.
+  exactly 0.5·rho0·IAS² (IAS = indicated airspeed); ArduPilot's 2.0 default reads 10.7% high.
 - ArduPilot ignores RC_CHANNELS_OVERRIDE unless source_system ==
   SYSID_MYGCS (255). Silently.
 - Message-interval floods before takeoff starve the climb loop —
@@ -181,7 +187,7 @@ and the parm file comments. The ones that cost the most:
 - **SPI slave desynchronisation (origin unlocated).** Rarely, the
   slave engine loses byte alignment with the DUT's bus master; the
   harness's `unexp` counter then climbs by thousands per second and
-  ArduPlane boot-loops on the corrupt IMU replies. Detector: the
+  ArduPlane boot-loops on the corrupt inertial-sensor replies. Detector: the
   counters (healthy = 0, always). Cure: reset the harness, confirm the
   counters return to 0, then boot the DUT. What shifts the command byte
   has not been found; see doc/BENCH-OPERATIONS.md.

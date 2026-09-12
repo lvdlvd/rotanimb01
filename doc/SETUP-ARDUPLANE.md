@@ -70,7 +70,7 @@ models. `make -C selftest flash`, watch the console for PASS per device.
 
 The board definition is two commits against upstream ArduPilot master,
 shipped as patches in `dut/ardupilot/` (see the README there for what
-they contain and why). Verified to apply cleanly on master as of
+they contain and why). Applied and built (plane + bootloader) on master as of
 2026-07-27 (9bbfed9c91).
 
 ```
@@ -99,7 +99,10 @@ storage in sectors 1-2), the application starts at 0x08018000. Do NOT
 `stm32f2x mass_erase` on later reflashes — it wipes the parameter
 sectors; `program ... verify <addr>` erases only the sectors it writes.
 Once the bootloader is on, `./waf plane --upload` over the DUT's USB
-also works.
+also works. The shipped `NucleoF767ZI_bl.bin` is prebuilt; to rebuild it,
+`./waf configure --board NucleoF767ZI --bootloader && ./waf bootloader`
+from a CLEAN `build/NucleoF767ZI` (the application build leaves
+generated DroneCAN sources there that break the bootloader build).
 
 Flash order matters when both boards are up: reset the harness first
 (SPI bus quiet), then flash/reset the DUT. Flashing the DUT while the

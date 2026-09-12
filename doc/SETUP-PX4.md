@@ -9,7 +9,7 @@ square at 150 m, landing) with all sensors emulated.
 
 The board and the three upstream fixes it needs are five commits against
 PX4 main as of 2026-08-28 (7c4bf078f4), shipped as patches in `dut/px4/`
-(the README there lists them). Verified to apply cleanly on that base.
+(the README there lists them). Applied and built on that base.
 
 ```
 git clone https://github.com/PX4/PX4-Autopilot.git && cd PX4-Autopilot

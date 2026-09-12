@@ -1,6 +1,6 @@
 # ArduPilot: the NucleoF767ZI bench board
 
-Two commits against upstream ArduPilot master, verified with `git am` on
+Two commits against upstream ArduPilot master, applied and built on
 master as of 2026-07-27 (9bbfed9c91):
 
 1. **NucleoF767ZI: HITL bench board** — `libraries/AP_HAL_ChibiOS/hwdef/

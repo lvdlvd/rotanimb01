@@ -1,6 +1,6 @@
 // Byte-pinned against pymavlink (MAVLink2, ardupilotmega dialect): every
 // frame below was generated with srcSystem=255 srcComponent=190 seq=7.
-// Generator kept in the session scratchpad (genvectors.py); the vectors are
+// Generated with pymavlink (generator not in this tree); the vectors are
 // the spec — if an encoder or crcExtra entry drifts, these fail.
 package main
 

@@ -267,7 +267,7 @@ it as an ArduPilot SITL "JSON backend" (lockstep UDP), and stock SITL
 arduplane flies it at --speedup 10 with no hardware in the loop.
 SIL under the HIL: iterate fast against identical physics, then push
 the result through the real SPI/DroneCAN sensor path for validation.
-Tools: tools/bench/sitl{params,fly,tune,loiter}.py; lessons encoded
+Tools: tools/bench (then python, since ported to Go); lessons encoded
 there (TKOFF_THR_MINSPD=0 for wheeled starts; AUTOTUNE_AXES=2;
 in-mode gain readback; in-mode altitude-floor recovery).
 
@@ -300,8 +300,8 @@ Results, ~30 min wall clock:
      rebooted the harness and silently reverted the elevator to the
      all-positive default = INVERTED for ArduPilot (pwm-high must be
      nose-up). Symptom: elevator railed 18.8 deg nose-down, ground
-     roll through 53 m/s, no rotation. Fix + procedure: drive.py
-     'cal' (elevator defl -25 deg), resend after EVERY harness reboot.
+     roll through 53 m/s, no rotation. Fix + procedure: `bench drive
+     cal` (elevator defl -25 deg), resend after EVERY harness reboot.
    - The night-4 autotuned ROLL gains had silently REVERTED to
      defaults: a completed AUTOTUNE keeps its gains in RAM only, and
      the first DUT reboot after night 4 dropped them. Instrumented
@@ -353,5 +353,5 @@ model (bigger, better long-term — enables AUTO takeoff/landing testing).
   ARSPD_SKIP_CAL 1 + ARSPD_OFFSET 0 (reboot-in-flight-proof).
 - INS_ACC_ID must be param_set once by hand after any param wipe.
 - After any watchdog event: full power cycle before expecting baro cal.
-- Bench driver: scratchpad bench/{mav.py,drive.py,serbridge.py};
+- Bench driver: python precursors of tools/bench (since ported to Go);
   serial bridge on the Pi at :5760.

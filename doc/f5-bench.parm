@@ -70,7 +70,7 @@ PTCH_LIM_MIN_DEG -18
 # no departures). This airframe wants ~9x the default FF: low control
 # authority (53 deg/s full aileron). NOTE: AP_AutoTune RESTORES gains on
 # mode exit unless both D and P limits were found — read gains while still
-# in the mode (tools/bench/autotune2.py). NIGHT-7 TRAP: even a completed
+# in the mode (`bench tune` does). NIGHT-7 TRAP: even a completed
 # autotune only holds its gains in RAM — the first DUT reboot after
 # night 4 silently reverted these to defaults, and the whole night-5
 # "L1 loiter mystery" was flown on DEFAULT roll gains (4.7 s
@@ -83,7 +83,7 @@ RLL_RATE_D       0.3832
 
 # --- AUTOTUNE-learned PITCH gains (SITL rig, 2026-07-16): the bench
 # ladders kept dying at the altitude floor; the same fdm.c under
-# ArduPilot's SITL JSON backend (fdm/sitljson, tools/bench/sitl*.py)
+# ArduPilot's SITL JSON backend (fdm/sitljson, tools/bench)
 # completed both ladders cleanly at 10x real-time. FF matches the ~1.65
 # the bench converged to twice. A/B in SITL: these gains -> both loiter
 # legs textbook (ias exact, R +3%); default pitch -> the whole night-5

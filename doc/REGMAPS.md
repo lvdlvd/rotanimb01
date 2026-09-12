@@ -130,7 +130,7 @@ DRC bits (default: any register write, or reading the measurement results).
 Resolved by the user: no I2C emulation (SPI only, skip the accel wake
 quirk); BMP390 IIR store-only; gyro drdy auto-clear via scheduler tick OK.
 All interface data crosses through explicit serialize/deserialize steps
-(lib/binary.h style) — never casts.
+(nlib/binary.h style) — never casts.
 
 Findings from the DUT drivers themselves:
 

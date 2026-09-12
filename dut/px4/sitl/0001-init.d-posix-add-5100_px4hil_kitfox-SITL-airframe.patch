@@ -1,0 +1,112 @@
+From 68f28abf21ee261b2d4c4c8814654734269da116 Mon Sep 17 00:00:00 2001
+From: Luuk van Dijk <lvd@mndmttr.net>
+Date: Sat, 29 Aug 2026 15:31:44 +0200
+Subject: [PATCH] feat(init.d-posix): add 5100_px4hil_kitfox SITL airframe
+
+Fixed-wing airframe for the px4hil TCP bridge (rotanimb01 harness
+fdm.c, the same Kitfox physics the ArduPlane bench flies). Uses the
+default px4-rc.mavlinksim path: the bridge listens on :4560 and
+simulator_mavlink connects out in TCP-client mode.
+
+Control allocation is single-channel aileron + elevator + rudder + one
+tractor motor with PWM_MAIN_FUNC1..4 = 201/202/203/101 so the
+HIL_ACTUATOR_CONTROLS indices land as 0=ail 1=ele 2=rud 3=thr, matching
+the bridge's channel map. Speeds, mass, and TECS envelope come from the
+fdm parameter table (480 kg, 12.2 m2, Vs ~20 m/s, trim 30 m/s, ~4.5 m/s
+climb). Flight-verified: runway takeoff to MIS_TAKEOFF_ALT and Hold
+loiter at trim airspeed.
+---
+ .../init.d-posix/airframes/5100_px4hil_kitfox | 67 +++++++++++++++++++
+ .../init.d-posix/airframes/CMakeLists.txt     |  2 +
+ 2 files changed, 69 insertions(+)
+ create mode 100644 ROMFS/px4fmu_common/init.d-posix/airframes/5100_px4hil_kitfox
+
+diff --git a/ROMFS/px4fmu_common/init.d-posix/airframes/5100_px4hil_kitfox b/ROMFS/px4fmu_common/init.d-posix/airframes/5100_px4hil_kitfox
+new file mode 100644
+index 0000000000..16cdec9920
+--- /dev/null
++++ b/ROMFS/px4fmu_common/init.d-posix/airframes/5100_px4hil_kitfox
+@@ -0,0 +1,67 @@
++#!/bin/sh
++#
++# @name Kitfox V (px4hil bridge)
++#
++# @type Plane
++# @class Plane
++#
++# Kitfox Series 5 flown through the px4hil TCP bridge around the
++# rotanimb01 harness fdm.c (same physics the ArduPlane bench flies).
++# The bridge listens on :4560 and PX4 connects as TCP client via the
++# default px4-rc.mavlinksim path; lockstep follows the bridge's
++# HIL_SENSOR timestamps (250 Hz), HIL_GPS at 5 Hz.
++#
++# Model reference values (fdm_defaults, fdm-DESIGN.md mode 1):
++# - mass 480 kg, wing 12.2 m2 / 9.75 m span / 1.25 m chord
++# - stall alpha 15 deg -> Vs ~20 m/s CAS; trim/cruise 30 m/s
++# - Rotax 912iS 100 hp, static thrust 1600 N
++#
++# USAGE:
++#   px4hil &                       (rotanimb01/tools/px4hil)
++#   PX4_SIM_MODEL=px4hil_kitfox bin/px4   (from build rootfs)
++
++. ${R}etc/init.d/rc.fw_defaults
++
++# Control allocation: single-channel aileron + elevator + rudder + one
++# tractor motor. The HIL_ACTUATOR_CONTROLS index IS the output channel,
++# and the bridge decodes 0=aileron 1=elevator 2=rudder 3=throttle.
++param set-default CA_ROTOR_COUNT 1
++param set-default CA_ROTOR0_PX 1.0
++param set-default CA_SV_CS_COUNT 3
++param set-default CA_SV_CS0_TRQ_R 1
++param set-default CA_SV_CS0_TYPE 15
++param set-default CA_SV_CS1_TRQ_P 1
++param set-default CA_SV_CS1_TYPE 3
++param set-default CA_SV_CS2_TRQ_Y 1
++param set-default CA_SV_CS2_TYPE 4
++param set-default PWM_MAIN_FUNC1 201
++param set-default PWM_MAIN_FUNC2 202
++param set-default PWM_MAIN_FUNC3 203
++param set-default PWM_MAIN_FUNC4 101
++
++# Airspeeds from the fdm table (m/s CAS)
++param set-default FW_AIRSPD_STALL 20.0
++param set-default FW_AIRSPD_MIN 24.0
++param set-default FW_AIRSPD_TRIM 30.0
++param set-default FW_AIRSPD_MAX 45.0
++
++# TECS envelope: ~730 N excess thrust at 30 m/s -> ~4.5 m/s climb
++param set-default FW_T_CLMB_MAX 4.5
++param set-default FW_T_SINK_MIN 1.0
++param set-default FW_T_SINK_MAX 3.0
++param set-default FW_THR_TRIM 0.45
++param set-default FW_THR_MIN 0.05
++
++# Geometry / mass
++param set-default FW_WING_SPAN 9.75
++param set-default FW_WING_HEIGHT 2.0
++param set-default WEIGHT_BASE 480.0
++param set-default WEIGHT_GROSS 480.0
++
++# Ground start at the bench anchor: runway takeoff, no launch detection
++param set-default RWTO_TKOFF 1
++param set-default MIS_TAKEOFF_ALT 100.0
++
++# Kitfox-comfortable turns: <=30 deg bank at 30 m/s -> >=160 m radius
++param set-default NAV_LOITER_RAD 200.0
++param set-default FW_R_LIM 35.0
+diff --git a/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt b/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt
+index ce93573d15..c803d7c8a7 100644
+--- a/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt
++++ b/ROMFS/px4fmu_common/init.d-posix/airframes/CMakeLists.txt
+@@ -95,6 +95,8 @@ px4_add_romfs_files(
+ 	5020_xplane_alia250
+ 	5021_xplane_qtailsitter
+ 
++	5100_px4hil_kitfox
++
+ 	6011_gazebo-classic_typhoon_h480
+ 	6011_gazebo-classic_typhoon_h480.post
+ 
+-- 
+2.50.1 (Apple Git-155)
+

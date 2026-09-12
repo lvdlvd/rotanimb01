@@ -8,7 +8,7 @@
 # Makefile (device.h, pinmux.h, devs.ld, STM32G474Exx_RAM.ld — generated from
 # the reference manual, marked DO NOT EDIT; sections_ram.ld is the section
 # layout for the run-from-RAM image). Nothing on the build path points
-# outside the repository. Toolchain: arm-none-eabi-gcc 13 or newer
+# outside the repository. Toolchain: arm-none-eabi-gcc 14 or newer
 # (-std=gnu23); openocd for flashing.
 
 # TRANSPORT=usb (default): host link = pseudocan lines over the USB VCP

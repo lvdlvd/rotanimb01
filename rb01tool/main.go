@@ -1,6 +1,6 @@
 // rb01tool — console cockpit for the rotanimb01 HITL harness.
 //
-// Connects to the harness's USB CDC-ACM port (pseudocan lines, lib/fmtcan
+// Connects to the harness's USB CDC-ACM port (pseudocan lines, nlib/fmtcan
 // format), shows the live system state and lets single keys steer the
 // physics: speed, climb and turn-rate commands (CMD_STATE, auto-repeated so
 // the harness never sees them go stale) and the environment (CMD_ENV).
@@ -10,10 +10,10 @@
 // With no -p the single /dev/cu.usbmodem* is used; multiple candidates are
 // listed instead. The display repaints in place ~10x/s; 'q' quits.
 //
-// Wire format (lib/fmtcan): ID-A['.'ID-B]['R'] ':' hexpayload [':'crc16]
+// Wire format (nlib/fmtcan): ID-A['.'ID-B]['R'] ':' hexpayload [':'crc16]
 // [' 'port[' 'fmi]] '\n' — crc16 poly 0xc599 msb-first over the 4 header
 // bytes then the payload, priority-preserving uint32 header representation
-// (lib/can.h). The harness emits crc-less lines; we send with crc (the
+// (nlib/can.h). The harness emits crc-less lines; we send with crc (the
 // harness verifies a crc when present). Dictionary: src/canmsg.h.
 package main
 
@@ -38,7 +38,7 @@ import (
 // ---- pseudocan wire representation ------------------------------------------
 
 // Header is the priority-preserving uint32 representation of a CAN id
-// (lib/can.h): ID-A in bits 30:20, RTR bit 19, EXT bit 18, ID-B in 17:0.
+// (nlib/can.h): ID-A in bits 30:20, RTR bit 19, EXT bit 18, ID-B in 17:0.
 type Header uint32
 
 const (
@@ -324,10 +324,13 @@ func findPort(flagged string) (string, error) {
 	if flagged != "" {
 		return flagged, nil
 	}
-	m, _ := filepath.Glob("/dev/cu.usbmodem*")
+	m, _ := filepath.Glob("/dev/serial/by-id/usb-rotanimb01_hitl-harness_*-if00") // Linux
+	if len(m) == 0 {
+		m, _ = filepath.Glob("/dev/cu.usbmodem*") // macOS
+	}
 	switch len(m) {
 	case 0:
-		return "", fmt.Errorf("no /dev/cu.usbmodem* found; pass -p")
+		return "", fmt.Errorf("no harness port found (by-id rotanimb01_hitl-harness or /dev/cu.usbmodem*); pass -p")
 	case 1:
 		return m[0], nil
 	}
@@ -407,8 +410,8 @@ func main() {
 	fPort := flag.String("p", "", "serial port (default: the single /dev/cu.usbmodem*)")
 	fGPS := flag.String("gps", "", "second pseudocan port for the DroneCAN GPS/airspeed feeder (canusb bridge)")
 	fLag := flag.Int("gpslag", 150, "GPS feeder latency, ms")
-	fLat := flag.Float64("lat0", 52.0, "feeder origin latitude, deg")
-	fLon := flag.Float64("lon0", 5.1, "feeder origin longitude, deg")
+	fLat := flag.Float64("lat0", 45.52688, "feeder origin latitude, deg (default = the harness's on-board feeder origin)")
+	fLon := flag.Float64("lon0", 1.667291, "feeder origin longitude, deg")
 	flag.Parse()
 
 	port, err := findPort(*fPort)

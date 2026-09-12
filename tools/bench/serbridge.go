@@ -1,4 +1,4 @@
-// serbridge — TCP <-> serial bridge, runs ON the pi next to the DUT's
+// serbridge — TCP <-> serial bridge, runs ON the bench host next to the DUT's
 // MAVLink CDC port. One client at a time; the serial device is reopened
 // automatically when it vanishes (bench power cycles unplug it mid-session).
 package main

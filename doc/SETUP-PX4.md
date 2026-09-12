@@ -140,8 +140,17 @@ stream.
 ## 7. SITL: tools/px4hil
 
 `tools/px4hil` wraps the same `fdm.c` as a PX4 simulator (HIL_SENSOR +
-HIL_GPS out, HIL_ACTUATOR_CONTROLS in, lockstep): `make px4hil &&
-./px4hil`, then `make px4_sitl_default none` on the PX4 side with a
-fixed-wing airframe whose output map matches px4hil's (0 ail, 1 ele,
-2 rud, 3 thr — see the header of tools/px4hil/main.go). Flight-verified:
-runway takeoff, loiter, EKF2 healthy.
+HIL_GPS out, HIL_ACTUATOR_CONTROLS in, lockstep). It needs Go 1.25 and
+fetches one MAVLink module from the network on first build. The
+matching SITL airframe (output map 0 ail, 1 ele, 2 rud, 3 thr — NOT the
+bench board's) is `dut/px4/sitl/0001-*.patch`, applied the same way as
+the board patches:
+
+```
+git am /path/to/rotanimb01/dut/px4/sitl/*.patch
+make px4_sitl_default                        # PX4 side, once
+cd tools/px4hil && make px4hil && ./px4hil & # bridge listens on :4560
+PX4_SIM_MODEL=px4hil_kitfox build/px4_sitl_default/bin/px4   # from the build rootfs
+```
+
+Flight-verified: runway takeoff to 100 m, loiter, EKF2 healthy.

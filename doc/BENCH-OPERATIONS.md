@@ -16,7 +16,7 @@ On the **harness**, lost on every reboot, reflash, or power cycle:
   (kinematic, parked) and the DroneCAN GPS feed produces nothing until
   the model runs;
 - the engine model (`bench drive engine 912|915`);
-- the sensor noise mask (CMD_NOISE), wind, and every PARAM_SET.
+- wind, gusts and every PARAM_SET.
 
 On the **DUT** (ArduPilot): a completed AUTOTUNE holds its gains in RAM
 until they are `param_set` explicitly; the watchdog-reset flag lives in
@@ -46,9 +46,10 @@ verifies the DUT side.
   what it writes.
 - Harness USB CDC wedge: `serbridge` loops "serial lost (EOF)" while the
   harness console still streams — the model is alive, only its USB is
-  wedged. Do not reset the harness (kills the flight): a
-  USBDEVFS_RESET ioctl on the device node re-enumerates it and the
-  flight survives. On a Pi, 493 "Undervoltage detected" events later
+  wedged. Do not reset the harness (kills the flight): `sudo bench
+  usbreset -dev <the harness by-id path>` (Linux; a USBDEVFS_RESET on
+  the device node) re-enumerates it and the flight survives. On a Pi,
+  493 "Undervoltage detected" events later
   turned out to be the cause of a whole evening of such wedges: give
   the host a proper supply before chasing USB bugs.
 
@@ -92,7 +93,8 @@ climb above ~3000 m, and read it back after every cycle.
    (PX4) for the estimator and the airspeed binding.
 4. `bench params -profile bench` (ArduPilot; PX4's equivalents are in
    the airframe) — BEFORE expecting a fly check to pass.
-5. `bench fly -alt 300` → FLY CHECK PASS (roll ≤ 12°). It only fails
+5. `bench fly -alt 300` → FLY CHECK PASS (worst |roll|,|pitch| < 25°; a clean
+   bench stays under 12°). It only fails
    with dirty harness state; go back to 1.
 6. The mission / loiter legs / probe.
 
@@ -156,8 +158,10 @@ detector.
   explains why the harness must be up before the DUT.
 - The GPS feed is Fix2 at 5 Hz with a configurable lag (default 150 ms,
   `drive gps 1 <lag_ms>`); `drive gps 0` silences it for GPS-denied
-  segments. Both the on-board feeder and rb01tool's host feeder are
-  node 42 — run exactly one.
+  segments. rb01tool has an older host-side feeder (`-gps`, needing a
+  second pseudocan-speaking CAN adapter on the DUT bus) that predates
+  the on-board one; both are node 42, so never run both. The on-board
+  feeder is the one the guides use and the one that flew.
 - ARSPD_RATIO must be 1.6327 (= 2/ρ0): the harness's differential
   pressure is exactly ½ρ0·IAS²; at the 2.0 default IAS reads 10.7% high.
 

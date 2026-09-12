@@ -1,6 +1,6 @@
 #pragma once
 
-// SRAM1-at-zero remap for the G4 RAM run model (lib/sections_ram.ld).
+// SRAM1-at-zero remap for the G4 RAM run model (nlib/sections_ram.ld).
 // startup_init_memory() has already copied the code image to physical SRAM1;
 // this maps SRAM1 at 0x00000000, so the very next fetches execute from SRAM
 // at zero wait states with every address unchanged. Call it right after

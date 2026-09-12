@@ -19,7 +19,7 @@
 //   HardFault_Handler, MemManage_Handler, BusFault_Handler, UsageFault_Handler.
 //
 // Requires the generated device header as "device.h" and the linker symbols
-// _estack, _stack_limit (lib/sections.ld), _stext, _etext.
+// _estack, _stack_limit (nlib/sections.ld), _stext, _etext.
 
 #include <stdint.h>
 

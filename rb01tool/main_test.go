@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// harness-emitted line (crc-less, trailing port+fmi), per lib/fmtcan:
+// harness-emitted line (crc-less, trailing port+fmi), per nlib/fmtcan:
 // id29(MEAS, STATUS, srcid 0xee, seq 0) = 0x0611ee90 -> ida 184, idb 1ee90
 func TestParseHarnessLine(t *testing.T) {
 	h, p, err := parseLine("184.1ee90:0000303907d20000 1 0\r\n")

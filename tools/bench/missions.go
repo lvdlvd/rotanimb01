@@ -1,6 +1,6 @@
 // missions — the campaign flights, ported 1:1 from the python originals that
 // flew the F5 checkride (CSV formats kept identical). All run against either
-// rig: SITL (127.0.0.1:5760) or the bench (serbridge on the pi).
+// rig: SITL (127.0.0.1:5760) or the bench (serbridge on the bench host).
 package main
 
 import (

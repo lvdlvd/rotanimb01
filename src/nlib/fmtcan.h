@@ -11,7 +11,7 @@
 // over the four header bytes then the payload, polynomial 0xc599 msb-first
 // (NOT the CAN bus crc). port is one digit, a bitmask naming which of up
 // to 3 CAN ports the message goes to / came from; fmi is the receive
-// filter match index. The header representation is lib/can.h's priority-
+// filter match index. The header representation is nlib/can.h's priority-
 // preserving uint32.
 //
 // On input the ':'crc16 and the trailing " port fmi" are optional; a bare

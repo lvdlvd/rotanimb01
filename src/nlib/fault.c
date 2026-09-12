@@ -2,7 +2,7 @@
 
 #include "device.h"
 
-// Linker-provided: stack top / low limit (lib/sections.ld) and the code span.
+// Linker-provided: stack top / low limit (nlib/sections.ld) and the code span.
 extern uint32_t _estack, _stack_limit, _stext, _etext;
 
 // The crash record lives at the low end of CCRAM (.crashdump, NOLOAD) so it is

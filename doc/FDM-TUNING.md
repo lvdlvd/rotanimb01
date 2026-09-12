@@ -20,7 +20,8 @@ nosewheel washout, brakes below 15% power, crash-repark), the servo lag
 (τ 60 ms, 300°/s rate limit, throttle τ 0.3 s — controls.c), and the
 sensor noise levels (src/main.c, `noise()`: gyro 0.2°/s white + a
 per-boot bias and a random walk, accel 5 mg, mag 20 nT, baro ±1 Pa
-dither; the per-sensor enable mask is CMD_NOISE 0x42).
+dither). The noise is always on; CMD_NOISE 0x42 in the dictionary is
+reserved (the harness stores the frame and does nothing with it).
 
 ## The parameter table (PARAM_SET index → field)
 
@@ -84,10 +85,12 @@ it prints, and the acceptance bands it enforces:
 - ISA table vs the closed form; trim solver converges across the
   envelope (20-45 m/s, 0-4000 m); glide energy bookkeeping (Ė ≈ −D·V);
   quaternion norm and stall blend monotonic/C¹.
-- Modes by numerical linearisation at cruise: short period 1.5-6 rad/s,
-  phugoid 0.05-0.4 rad/s, dutch roll 1-5 rad/s, roll rate 40-95°/s with
-  τ 0.03-0.3 s. A sign error in a derivative fails here before it ever
-  flies.
+- Modes by pulse response at cruise: short period 1.5-6 rad/s when it
+  oscillates at all (with the default `Cmq` −12 it is overdamped, prints
+  `omega 0.00`, and the gate accepts that; the separate "undamped" check
+  still fails on a wrong-signed `Cma`/`Cmq`), phugoid 0.05-0.4 rad/s,
+  dutch roll 1-5 rad/s, roll rate 40-95°/s with τ 0.03-0.3 s. A sign
+  error in a derivative fails here before it ever flies.
 - Observables: Vs (the POH anchor ~19.7 m/s), climb at Vy 2.5-8 m/s,
   full-throttle climb at 4500 m for both engine presets, trim elevator
   at 25 and 45 m/s.
@@ -131,10 +134,10 @@ not zero.
 
 ## Sensor-side fidelity knobs
 
-- Noise and bias walk: constants in `src/main.c` (search `noise(`);
-  the per-sensor enable mask is CMD_NOISE. Turning noise OFF is a
-  trap: bit-identical pressure trips ArduPilot's stuck-baro detector,
-  and a noise-free bench let a DCM-drift bug hide for nights.
+- Noise and bias walk: constants in `src/main.c` (search `noise(`),
+  compiled in, no runtime switch. Do not be tempted to compile it out:
+  bit-identical pressure trips ArduPilot's stuck-baro detector, and a
+  noise-free bench let a DCM-drift bug hide for nights.
 - GPS lag: `drive gps 1 <ms>` (default 150 — a zero-lag GPS makes HITL
   kinder than reality).
 - Sensor rates and ranges follow the DUT's own configuration writes

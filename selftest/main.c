@@ -1,6 +1,6 @@
 // M4a self-test — the board masters its own sensor bus (v3 made SPI1 free).
 //
-// SPI1 (master, lib/spi.h, software CS on PB0/PB1/PA2/PA3) is jumpered onto
+// SPI1 (master, nlib/spi.h, software CS on PB0/PB1/PA2/PA3) is jumpered onto
 // the SPI3 sensor bus and replays the flight-tested master's init sequences
 // against the four register-file models:
 //

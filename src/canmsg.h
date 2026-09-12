@@ -4,7 +4,7 @@
 //
 // All traffic uses 29-bit headers, interpreted as bit-fields per the shared
 // in-house dictionary convention (ARINC825-derived), and big-endian payloads
-// (lib/binary.h). Header layout, MSB-justified in the 29-bit id:
+// (nlib/binary.h). Header layout, MSB-justified in the 29-bit id:
 //
 //   [28:26] LCC     logical communication channel: 0b001 measurements,
 //                   0b110 (TMC) configuration/commands
@@ -22,7 +22,7 @@
 //
 //   TMC  -> harness   0x40 CMD_STATE  i16 V cm/s, i16 hdot cm/s, i16 psidot mrad/s, u16 flags
 //                     0x41 CMD_ENV    u16 QNH Pa/10, u16 T0 0.1K, u16 B 0.01uT, i16 incl 0.01deg
-//                     0x42 CMD_NOISE  per-sensor enable mask + levels
+//                     0x42 CMD_NOISE  reserved (stored, not consumed): noise levels are constants in main.c
 //                     0x43 FDM_MODE   u8 mode (0 kinematic / 1 six-dof), u8 flags
 //                     0x44 FDM_INIT   u16 alt m, u16 IAS 0.1 m/s, u16 heading 0.01 deg
 //                                     -> fdm trim & reset (air-start), fdm-DESIGN.md

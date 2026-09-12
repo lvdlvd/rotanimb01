@@ -2,7 +2,7 @@
 
 // Startup memory init. Call startup_init_memory() first thing in
 // Reset_Handler: it copies the .data initialiser image to RAM and zeroes .bss
-// using the symbols from lib/sections.ld. Run-model-independent — for a RAM
+// using the symbols from nlib/sections.ld. Run-model-independent — for a RAM
 // build _sidata == _sdata so the copy loop is a no-op.
 //
 // The application owns Reset_Handler (the vector table is the program); a
@@ -10,14 +10,14 @@
 //
 //   void Reset_Handler(void) {
 //       startup_init_memory();
-//       startup_remap0();   // RAM-model builds only (lib/remap_g4.h)
+//       startup_remap0();   // RAM-model builds only (nlib/remap_g4.h)
 //       SCB.VTOR = (uint32_t)(uintptr_t)__vectors;  // point at our table
 //       ... clock, fpu ...
 //       main();
 //   }
 //
 // The G4 RAM run model finishes with the SRAM1-at-zero remap — an explicit
-// call to startup_remap0() from lib/remap_g4.h, a G4-only unit: the app
+// call to startup_remap0() from nlib/remap_g4.h, a G4-only unit: the app
 // states its run model in code, no conditional compilation.
 
 #include "device.h"

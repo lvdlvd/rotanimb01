@@ -1,6 +1,6 @@
 // bench — the rotanimb01 flight-campaign driver, one binary for both rigs:
 // the SITL rig (fdm/sitljson + arduplane --model JSON) and the real bench
-// (serbridge on the pi). See README.md for session procedures.
+// (serbridge on the bench host). See README.md for session procedures.
 //
 //	bench arm       [-c addr]
 //	bench mode      [-c addr] manual|fbwa|autotune|rtl|loiter|takeoff
@@ -15,6 +15,7 @@
 //	bench watch     [-c addr] [-dur 2m]
 //	bench drive     <mode|airstart|setpos|gps|wind|engine|param|cal|tail> [args]   (on the bench host)
 //	bench serbridge [-dev path] [-port 5760]                                 (on the bench host)
+//	bench usbreset  [-dev path]                        (Linux, root: USBDEVFS_RESET of a wedged CDC)
 //
 // Defaults: -c 127.0.0.1:5760 (SITL). The bench is the same port through
 // serbridge on the host the USB devices hang off (mDNS names don't resolve
@@ -46,7 +47,7 @@ func dial(addr string) *Session {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: bench <arm|mode|param|params|fly|loiter|probe|tune|disarm|reboot|drive|serbridge> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: bench <arm|mode|param|params|fly|loiter|probe|tune|watch|disarm|reboot|drive|serbridge|usbreset> [flags]")
 		os.Exit(2)
 	}
 	cmd, args := os.Args[1], os.Args[2:]
@@ -193,6 +194,11 @@ func main() {
 		port := fs.Int("port", 5760, "TCP listen port")
 		fs.Parse(args)
 		err = cmdSerbridge(*dev, *port)
+
+	case "usbreset":
+		dev := fs.String("dev", defHarnCmd(), "tty device whose USB parent to reset ($ROTANIMB01_HARNESS)")
+		fs.Parse(args)
+		err = usbReset(*dev)
 
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", cmd)

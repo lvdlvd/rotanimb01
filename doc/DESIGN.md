@@ -201,7 +201,7 @@ buffer per MISO with the CS lines driving the enables.
 
 ## SPI register-file slave engine
 
-`lib/spislave.{h,c}` — the generic engine, two **bindings** per
+`nlib/spislave.{h,c}` — the generic engine, two **bindings** per
 instance:
 
 - **hw-NSS binding** (SPI1, SPI2): one device per peripheral. Hardware
@@ -377,7 +377,7 @@ CAN-FD as an option once `lib/fdcan.h` grows it. Bit timing from
 `clock_fdcan_hz()`. All headers are 29-bit bit-fields per the shared
 in-house dictionary convention (ARINC825-derived: LCC / 7-bit MSGID /
 FSB / SRCID-from-UID / ts_seq — layout in `src/canmsg.h`), payloads
-big-endian (`lib/binary.h`). The harness owns the 0x40 MSGID block in
+big-endian (`nlib/binary.h`). The harness owns the 0x40 MSGID block in
 both channels; 0x01–0x3f (measurements) and 0x00–0x03, 0x70+ (TMC)
 stay with the existing device dictionary. Scaled ints, 8-byte frames:
 
@@ -449,7 +449,7 @@ Into the library:
   age} µs. Generic (RC input, tachometers, the sync-PLL reference).
 - **`lib/exti.h`** (header-only) — SYSCFG EXTICR routing + edge config
   + pending clear. Missing today; ~60 lines of inlines.
-- **`lib/spislave.{h,c}`** — the register-file slave engine with both
+- **`nlib/spislave.{h,c}`** — the register-file slave engine with both
   bindings (hw-NSS single-device, SSM multi-device). A *different
   animal* from DESIGN.md's deferred "slave mode reusing SPIQ" (stm↔stm
   transport): this emulates a register-file protocol, generic across
@@ -474,7 +474,7 @@ day a 100-pin board shows up (SPI4 lives on port E), useful regardless.
 Every milestone compiles clean (gnu23, -Wextra) and has a test that
 runs **without the DUT** — boards are in abundance, so a second
 Nucleo runs a "DUT-mimic" master firmware built on the existing
-`lib/spi.h` queue, replaying scripted and later *recorded ArduPilot
+`nlib/spi.h` queue, replaying scripted and later *recorded ArduPilot
 transaction traces* over real inter-board wiring. Rough sizes are
 new-code lines.
 
@@ -486,7 +486,7 @@ new-code lines.
 - **M2 — `lib/exti.h` + `lib/fdcan` (~600).** Bring up against a host
   adapter (`candump`/`cansend`); dictionary encode/decode; stale
   watchdog. PWM report path live end-to-end.
-- **M3 — `lib/spislave` engine (~450).** One dummy 16-register device
+- **M3 — `nlib/spislave` engine (~450).** One dummy 16-register device
   on each binding. DUT-mimic board drives randomized read/write bursts
   at 1/2/4 MHz into both a hw-NSS instance and the SSM pair. Assert:
   regfile contents; measured RXNE→DR margin (scope or timer) —

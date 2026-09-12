@@ -30,17 +30,29 @@ matter for flight; 5-8 are captured and reported. The CAN transceivers
 need 5 V: at 3.3 V the bus never goes dominant and the DUT's CAN error
 counter climbs forever (LEC = bit 0).
 
-USB: the DUT's user USB (CN13) is SERIAL0/MAVLink; its ST-Link VCP
-(USART3) is a debug console. The harness's USB (PA11/PA12) is the
-pseudocan command/telemetry link; its console is USART1 PA9/PA10 at
-115200 (on a breakout, through the ST-Link programmer's VCP; on a
-NUCLEO-G474RE wire a USB-serial adapter or skip it — everything the
-console prints is also reachable over pseudocan).
+USB and consoles: the DUT's user USB (CN13) is SERIAL0/MAVLink; its
+ST-Link VCP (USART3) is a debug console. The harness has two links and
+you need both:
+
+- its USB (PA11/PA12) is the **pseudocan** command/telemetry link
+  (STATUS, DIAG, PARAM_VAL, TRUTH_*, and every command in);
+- its **console** is USART1 PA9/PA10 at 115200. The once-a-second
+  heartbeat (`fdm 1g`, altitude, psi, the post-lag surfaces, the PWM
+  cal echo, the SPI counters) exists ONLY there, and `bench drive`
+  reads it back after every command. On the breakout board this
+  guide assumes, PA9/PA10 are wired to the ST-Link programmer's VCP
+  and appear as the ST-Link's second CDC interface. On a
+  NUCLEO-G474RE the on-board ST-Link VCP is on PA2/PA3 (USART2), not
+  USART1: wire a USB-serial adapter to PA9/PA10 and point
+  `ROTANIMB01_CONSOLE` at it. Also on a Nucleo: PC13 is the user
+  button, not an LED, and PA11/PA12 have no USB connector, so the
+  pseudocan link needs a hand-made USB cable; the selftest's jumper
+  set uses PA2/PA3 as chip selects, which collide with that VCP.
 
 ## 2. Build and flash the harness
 
-Toolchain: arm-none-eabi-gcc 13 or newer (the sources are `-std=gnu23`),
-GNU make, openocd. Nothing outside this repository is needed.
+Toolchain: arm-none-eabi-gcc 14 or newer (the sources are `-std=gnu23`),
+GNU make, openocd. The harness build needs nothing outside this repository.
 
 ```
 make -C src            # builds, runs the host-side gates (fdmgate, dccheck)
@@ -54,12 +66,14 @@ more than one ST-Link on the host:
 make -C src flash OPENOCD_ADAPTER="-c 'adapter serial <serial>'"
 ```
 
-Done looks like: the breakout LED (PC13) blinks, and the harness
-enumerates as a USB CDC device named `rotanimb01 hitl-harness`. On Linux
-it appears as `/dev/serial/by-id/usb-rotanimb01_hitl-harness_<uid>-if00`;
-on macOS as a `/dev/cu.usbmodem*`. The console (115200) prints a
-heartbeat line once a second: `fdm 0g` means the model is parked and
-the sensor emulation serves rest truth.
+Done looks like: the breakout LED (PC13, active low) blinks, and the
+harness enumerates as a USB CDC device named `rotanimb01 hitl-harness`.
+On Linux it appears as
+`/dev/serial/by-id/usb-rotanimb01_hitl-harness_<uid>-if00`; on macOS as
+a `/dev/cu.usbmodem*`. The console (115200) prints a heartbeat line
+once a second: `fdm 0g` means the model is parked and the sensor
+emulation serves rest truth. `rb01tool` (section 4) on the pseudocan
+port shows STATUS and DIAG arriving at 10 Hz and 1 Hz.
 
 Optional but recommended once: `selftest/` lets the harness master its
 own sensor bus with seven jumpers (table at the top of selftest/main.c)
@@ -122,6 +136,13 @@ cd rb01tool && go build          # interactive cockpit + PFD
 cd tools/bench && go build       # campaign driver; GOOS=linux GOARCH=arm64 for a Pi
 ```
 
+Go 1.21 or newer, standard library only (bench needs golang.org/x/sys
+for termios, fetched by `go build`). `rb01tool -p <port>` names the
+harness pseudocan port; without `-p` it looks for exactly one
+`/dev/serial/by-id/usb-rotanimb01_hitl-harness_*` (Linux) or
+`/dev/cu.usbmodem*` (macOS). tools/px4hil is Go 1.25 and fetches one
+MAVLink module from the network.
+
 If the USB devices hang off a separate host (a Pi), run there:
 
 ```
@@ -149,8 +170,11 @@ mavproxy> reboot
 or, with the tool, `bench params -profile bench -reboot`, which stages
 the tuning core plus the DroneCAN sensor config (GPS1_TYPE 9, ARSPD_TYPE
 8 + SKIP_CAL, ARSPD_RATIO 1.6327), the synthetic INS calibration, and
-verifies every write by readback. Do this before expecting any fly
-check to pass.
+verifies every write by readback. The tool's list (tools/bench/
+missions.go) is the authoritative staged set — it adds NAVL1_DAMPING
+0.75 and leaves the parm file's bench-comfort lines (logging off, RTL
+autoland) alone; the parm file is the annotated record. Do one of the
+two before expecting any fly check to pass.
 
 Then sanity, all with the harness parked (`fdm 0g` or `fdm 1g`):
 
@@ -195,7 +219,9 @@ bench fly -alt 300
 ```
 
 TAKEOFF-mode departure, climb, 60 s of hands-off FBWA at cruise
-throttle, PASS/MARGINAL verdict with roll statistics. It passes from
+throttle, PASS/MARGINAL verdict with roll statistics. PASS = worst |roll| and
+|pitch| both under 25° over the hands-off minute (a clean bench flies it at
+under 12°). It passes from
 clean state (roll ≤ 12°); a failure here means dirty harness state —
 re-run section 6 from a harness reset.
 

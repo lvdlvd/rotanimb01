@@ -31,7 +31,7 @@ watching USB — macOS drops the CDC device and it looks like a crash.
 
 1. Power both boards, harness first. rb01tool up, `m` into FDM mode,
    `i` air-start OFF (start on the ground: h=0, IAS=0, level).
-2. `mavproxy.py --master=/dev/cu.usbmodem11301` — expect HEARTBEAT and
+2. `mavproxy.py --master=<the DUT MAVLink port>` — expect HEARTBEAT and
    **no** "Config Error: Baro" (that error = SPI wiring problem).
    `status` / watch STATUSTEXT.
 3. First session only: `param load doc/f5-bench.parm`, `reboot`.

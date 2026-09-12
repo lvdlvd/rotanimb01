@@ -4,7 +4,7 @@ Date: Tue, 1 Sep 2026 07:04:00 +0200
 Subject: [PATCH] feat(boards): add st/nucleo-f767zi
 
 NuttX board target for the NUCLEO-F767ZI (no upstream target exists;
-nearest relatives are the FMUv5/F765 boards). SPI4 sensor bus with
+nearest relatives are the FMUv5/F765 boards). SPI3 sensor bus with
 BMI088 accel/gyro and BMP388 baro on SPI, RM3100 mag, single CAN
 (BOARD_UAVCAN_INTERFACES=1: the board wires only CAN1, and the
 default of 2 costs every uavcan init a failed second-interface

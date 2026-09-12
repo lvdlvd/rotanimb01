@@ -1,5 +1,5 @@
 // drive — harness pseudocan commands over the local serial ports (runs ON
-// the pi, next to the USB devices). Wire format lib/fmtcan, dictionary
+// the bench host, next to the USB devices). Wire format nlib/fmtcan, dictionary
 // src/canmsg.h; the harness accepts crc-less lines.
 package main
 
@@ -361,5 +361,5 @@ func cmdDrive(cmd, dev, con string, args []string) error {
 		}
 		return tailPrint(con, secs, 0)
 	}
-	return fmt.Errorf("drive: unknown command %q (mode|airstart|wind|cal|tail)", cmd)
+	return fmt.Errorf("drive: unknown command %q (mode|airstart|setpos|gps|wind|engine|param|cal|tail)", cmd)
 }

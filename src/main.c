@@ -10,7 +10,7 @@
 // (the 0x40 block, both LCCs) in canmsg.h. The host link carries that
 // dictionary over one of two transports sharing PA11/PA12 (wiring-level
 // either/or, chosen at build time): TRANSPORT=usb (default) tunnels the
-// messages as pseudocan lines (lib/fmtcan, no per-line crc: USB bulk has
+// messages as pseudocan lines (nlib/fmtcan, no per-line crc: USB bulk has
 // link-level integrity) over the CDC-ACM virtual serial port; TRANSPORT=can
 // is FDCAN1 through an external transceiver.
 //
